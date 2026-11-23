@@ -237,3 +237,9 @@ dialog .primary{margin-top:1.2rem}
 .date-cell:disabled{background:#f1f0e9;border-color:#e3e1d6;color:#756f63}
 .date-cell:disabled strong{text-decoration:line-through;text-decoration-thickness:1px}
 .calendar-note{font-size:.86rem;color:var(--muted);margin-top:.65rem}
+
+.sms-consent{display:flex;align-items:flex-start;gap:.6rem;margin:1rem 0;color:var(--ink);font-size:.94rem}
+.sms-consent input{flex:none;width:1rem;height:1rem;margin:.25rem 0 0;accent-color:var(--rust)}
+.confirmation-actions,.cancel-actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1rem}
+.cancel-heading{font:400 clamp(2.1rem,5vw,3.2rem)/1.05 var(--display);margin:0}
+.cancel-actions [hidden]{display:none}

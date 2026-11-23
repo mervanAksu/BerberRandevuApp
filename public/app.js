@@ -24,7 +24,7 @@ let conflictNotice = '';
 let quoteNotice = '';
 let submitting = false;
 let result;
-const initial = () => ({ step: 0, serviceIds: [], barberId: '', date: '', time: '', name: '', phone: '', requestId: '' });
+const initial = () => ({ step: 0, serviceIds: [], barberId: '', date: '', time: '', name: '', phone: '', smsConsent: false, requestId: '' });
 let draft = initial();
 
 function element(tag, className, value) {
@@ -357,6 +357,17 @@ function detailsStep(panel) {
   const note = element('p', 'notice', 'Burası örnek bir salon. Deneme randevusu için örnek ad ve telefon kullan.');
   form.append(note, field('name', 'Ad soyad', 'text', 'Ör. Deniz Örnek', 80),
     field('phone', 'Telefon numarası', 'tel', '05XX XXX XX XX', 64));
+  const consent = element('label', 'sms-consent');
+  const checkbox = element('input');
+  checkbox.type = 'checkbox';
+  checkbox.name = 'smsConsent';
+  checkbox.checked = draft.smsConsent;
+  checkbox.disabled = submitting;
+  checkbox.addEventListener('change', () => {
+    draft.smsConsent = checkbox.checked;
+  });
+  consent.append(checkbox, element('span', '', 'Randevum için cep telefonuma SMS hatırlatması almak istiyorum.'));
+  if (catalog.smsAvailable) form.append(consent);
   const review = element('div', 'form-review');
   review.append(element('strong', '', serviceNames()), element('p', '', barber().name + ' · ' + dateLabel(draft.date) + ' · ' + draft.time),
     element('p', '', duration() + ' dakika · Toplam ' + currency.format(price())));
@@ -398,8 +409,16 @@ function confirmation() {
   rows.append(readOnlyRow('Randevu kodu', result.reference), readOnlyRow('Hizmet', serviceNames()),
     readOnlyRow('Berber', barber().name), readOnlyRow('Tarih ve saat', dateLabel(result.date) + ' · ' + result.time),
     readOnlyRow('Süre', result.duration + ' dakika'), readOnlyRow('Toplam', currency.format(result.price)));
-  panel.append(badge, heading, element('p', 'subtle', 'Deneme randevunun kodunu ve ayrıntılarını aşağıda bulabilirsin.'), rows,
-    button('Yeni randevu oluştur', 'secondary', () => {
+  panel.append(badge, heading, element('p', 'subtle', 'Deneme randevunun kodunu ve ayrıntılarını aşağıda bulabilirsin.'), rows);
+  const actions = element('div', 'confirmation-actions');
+  if (result.cancelPath) {
+    const link = element('a', 'secondary', 'İptal bağlantısı');
+    link.href = result.cancelPath;
+    link.rel = 'noreferrer';
+    panel.append(element('p', 'subtle', 'Randevunu daha sonra iptal etmek için bu bağlantıyı sakla.'));
+    actions.append(link);
+  }
+  actions.append(button('Yeni randevu oluştur', 'secondary', () => {
       draft = initial();
       result = null;
       dateOffset = 0;
@@ -407,6 +426,7 @@ function confirmation() {
       quoteNotice = '';
       loadCatalog(true);
     }));
+  panel.append(actions);
   return panel;
 }
 
@@ -515,9 +535,9 @@ function go(step) {
 
 async function save() {
   if (submitting) return;
-  const { serviceIds, barberId, date, time, name, phone } = draft;
+  const { serviceIds, barberId, date, time, name, phone, smsConsent } = draft;
   if (!draft.requestId) draft.requestId = crypto.randomUUID();
-  const payload = { serviceIds, barberId, date, time, name, phone, requestId: draft.requestId,
+  const payload = { serviceIds, barberId, date, time, name, phone, smsConsent, requestId: draft.requestId,
     quotedPrice: price(), quotedDuration: duration() };
   formError = '';
   formErrorField = '';
