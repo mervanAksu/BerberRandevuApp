@@ -1,4 +1,4 @@
-import { barbers, services } from '../server/config.mjs';
+import { bookedLabels, timeLabel } from '../server/booking.mjs';
 import { openBookingDatabase } from './database.mjs';
 
 function todayInIstanbul() {
@@ -8,12 +8,8 @@ function todayInIstanbul() {
   return formatter.format(new Date());
 }
 
-function timeLabel(minute) {
-  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
-}
-
 async function list(database, date) {
-  const rows = await database.prepare(`SELECT reference, service_id, service_ids, barber_id, start_minute,
+  const rows = await database.prepare(`SELECT reference, service_id, service_ids, service_names, barber_id, barber_name, start_minute,
     end_minute, price, customer_name, customer_phone
     FROM bookings WHERE booking_date = ? AND cancelled_at IS NULL ORDER BY start_minute, barber_id`)
     .bind(date).all();
@@ -24,16 +20,18 @@ async function list(database, date) {
   }
 
   console.log(date);
-  console.table(rows.results.map(row => ({
-    Kod: row.reference,
-    Saat: `${timeLabel(row.start_minute)}–${timeLabel(row.end_minute)}`,
-    Berber: barbers.find(barber => barber.id === row.barber_id)?.name ?? row.barber_id,
-    Hizmet: (row.service_ids === null ? [row.service_id] : JSON.parse(row.service_ids))
-      .map(id => services.find(service => service.id === id)?.name ?? id).join(', '),
-    Müşteri: row.customer_name,
-    Telefon: row.customer_phone,
-    Tutar: `${row.price} ₺`,
-  })));
+  console.table(rows.results.map(row => {
+    const { barberName, serviceNames } = bookedLabels(row);
+    return {
+      Kod: row.reference,
+      Saat: `${timeLabel(row.start_minute)}–${timeLabel(row.end_minute)}`,
+      Berber: barberName,
+      Hizmet: serviceNames.join(', '),
+      Müşteri: row.customer_name,
+      Telefon: row.customer_phone,
+      Tutar: `${row.price} ₺`,
+    };
+  }));
 }
 
 async function cancel(database, reference) {

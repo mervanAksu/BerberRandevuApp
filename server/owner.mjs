@@ -1,9 +1,11 @@
-import { ApiError, bookingWindow, createBooking, timeLabel } from './booking.mjs';
+import { ApiError, bookedLabels, bookingWindow, createBooking, profileChanged, timeLabel } from './booking.mjs';
 import { bookingBody, checkBookingHeaders, json, rateLimit, requireMethod } from './api.mjs';
-import { barbers, minutesSinceMidnight } from './config.mjs';
+import { minutesSinceMidnight } from './config.mjs';
+import { readProfile, saveProfile } from './profile.mjs';
 
 const sessionSeconds = 12 * 60 * 60;
 const encode = new TextEncoder();
+const settingsBodyBytes = 256 * 1024;
 
 async function sessionDigest(password, token) {
   const key = await crypto.subtle.importKey('raw', encode.encode(password),
@@ -31,25 +33,29 @@ function validDate(date) {
 
 async function agenda(db, date, authMode) {
   if (!validDate(date)) throw new ApiError(400, 'INVALID_DATE', 'Geçerli bir tarih seç.');
-  const [bookings, blocks] = await Promise.all([
+  const [bookings, blocks, profile] = await Promise.all([
     db.prepare(`SELECT reference, barber_id, start_minute, end_minute, customer_name, customer_phone,
-                       service_id, service_ids, walk_in, price FROM bookings WHERE booking_date = ? AND cancelled_at IS NULL
+                       service_id, service_ids, service_names, barber_name, walk_in, price FROM bookings WHERE booking_date = ? AND cancelled_at IS NULL
                 ORDER BY start_minute, barber_id`).bind(date).all(),
     db.prepare('SELECT * FROM staff_blocks WHERE booking_date = ? ORDER BY start_minute, barber_id').bind(date).all(),
+    readProfile(db),
   ]);
   const interval = row => ({ barberId: row.barber_id, date, time: timeLabel(row.start_minute), endTime: timeLabel(row.end_minute) });
   return json({ date, authMode, bookings: bookings.results.map(row => ({
     ...interval(row), reference: row.reference, name: row.customer_name, phone: row.customer_phone,
+    ...bookedLabels(row),
     serviceIds: row.service_ids ? JSON.parse(row.service_ids) : [row.service_id],
     walkIn: Boolean(row.walk_in), price: row.price,
-  })), blocks: blocks.results.map(row => ({ ...interval(row), id: row.id, reason: row.reason })) });
+  })), blocks: blocks.results.map(row => ({ ...interval(row), id: row.id, reason: row.reason,
+    barberName: profile.barbers.find(barber => barber.id === row.barber_id)?.name ?? row.barber_id })) });
 }
 
 async function block(db, input, now) {
   const { barberId, date, time, endTime, reason = '' } = input;
   const window = bookingWindow(now);
+  const profile = await readProfile(db);
   const quarter = /^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/;
-  if (!barbers.some(barber => barber.id === barberId) || !validDate(date) || date < window.today ||
+  if (!profile.barbers.some(barber => barber.active !== false && barber.id === barberId) || !validDate(date) || date < window.today ||
       date > window.lastDate || typeof time !== 'string' || typeof endTime !== 'string' || !quarter.test(time) || !quarter.test(endTime) || time >= endTime ||
       typeof reason !== 'string' || reason.length > 120 ||
       (date === window.today && minutesSinceMidnight(endTime) <= window.currentMinute)) {
@@ -57,9 +63,11 @@ async function block(db, input, now) {
   }
   const id = crypto.randomUUID();
   try {
-    await db.prepare(`INSERT INTO staff_blocks (id, barber_id, booking_date, start_minute, end_minute, reason)
-                      VALUES (?, ?, ?, ?, ?, ?)`).bind(id, barberId, date, minutesSinceMidnight(time),
-      minutesSinceMidnight(endTime), reason.trim()).run();
+    const inserted = await db.prepare(`INSERT INTO staff_blocks (id, barber_id, booking_date, start_minute, end_minute, reason)
+      SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT revision FROM salon_profile WHERE id = 1) = ?
+      RETURNING id`).bind(id, barberId, date, minutesSinceMidnight(time), minutesSinceMidnight(endTime),
+      reason.trim(), profile.revision).first();
+    if (!inserted) throw profileChanged();
   } catch (error) {
     if (error.message?.includes('booking_overlap')) throw new ApiError(409, 'SLOT_TAKEN', 'Bu aralıkta randevu veya kapalı saat var.');
     throw error;
@@ -78,12 +86,16 @@ export async function handleOwner(request, env, now = new Date()) {
   }
   const url = new URL(request.url);
   const action = url.pathname.slice('/api/owner/'.length);
-  requireMethod(request, action === 'agenda' ? 'GET' : 'POST');
-  if (request.method === 'POST') {
+  const settings = action === 'settings';
+  if (settings && !['GET', 'PUT'].includes(request.method)) {
+    throw new ApiError(405, 'METHOD_NOT_ALLOWED', 'Bu işlem desteklenmiyor.', { Allow: 'GET, PUT' });
+  }
+  if (!settings) requireMethod(request, action === 'agenda' ? 'GET' : 'POST');
+  if (request.method !== 'GET') {
     if (request.headers.get('origin') !== url.origin) {
       throw new ApiError(403, 'INVALID_ORIGIN', 'Bu kaynaktan işletme işlemi yapılamaz.');
     }
-    checkBookingHeaders(request, url);
+    checkBookingHeaders(request, url, settings ? settingsBodyBytes : undefined);
   }
   const db = env.DB;
   if (platform && action === 'login') return json({ ok: true });
@@ -102,6 +114,17 @@ export async function handleOwner(request, env, now = new Date()) {
   const digest = !platform && token && await sessionDigest(password, token);
   if (!platform && (!digest || !await db.prepare('SELECT 1 FROM owner_sessions WHERE digest = ? AND expires_at > ?')
     .bind(digest, now.getTime()).first())) throw new ApiError(401, 'LOGIN_REQUIRED', 'İşletme parolanla giriş yap.');
+  if (settings) {
+    let saved;
+    if (request.method === 'GET') {
+      saved = await readProfile(db);
+    } else {
+      const { profile, revision } = await bookingBody(request, settingsBodyBytes);
+      saved = await saveProfile(db, { ...profile, revision }, now);
+    }
+    const { revision, ...profile } = saved;
+    return json({ revision, profile });
+  }
   if (action === 'agenda') return agenda(db, url.searchParams.get('date') || bookingWindow(now).today, platform ? 'platform' : 'password');
   const input = await bookingBody(request);
   switch (action) {

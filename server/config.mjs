@@ -2,10 +2,16 @@ export const shop = {
   name: 'Makas',
   location: 'Moda, Kadıköy',
   timeZone: 'Europe/Istanbul',
+  description: 'Hizmetlerimizi ve berberlerimizi inceleyerek sana uygun bir saate randevu alabilirsin.',
+  logoPath: '/mark.svg',
+  imagePath: '/media/salon.webp',
+  imageAlt: 'Güneş alan bir berber salonunda aynanın önündeki deri koltuk',
+  isDemo: true,
 };
 
 export const services = [
   {
+    active: true,
     id: 'sac-kesimi',
     name: 'Saç Kesimi',
     description: 'Yüz şekline ve saç yapına uygun kesim, yıkama ve şekillendirme.',
@@ -14,6 +20,7 @@ export const services = [
     category: 'Saç',
   },
   {
+    active: true,
     id: 'sakal-tirasi',
     name: 'Sakal Tıraşı',
     description: 'Sıcak havlu, sakal şekillendirme ve çizgi düzeltme.',
@@ -22,6 +29,7 @@ export const services = [
     category: 'Sakal',
   },
   {
+    active: true,
     id: 'sac-sakal',
     name: 'Saç & Sakal',
     description: 'Saç kesimi ve sakal tıraşı tek randevuda.',
@@ -30,6 +38,7 @@ export const services = [
     category: 'Bakım',
   },
   {
+    active: true,
     id: 'sac-boyama',
     name: 'Saç Boyama',
     description: 'Doğal tonlarda saç boyama ve son şekillendirme.',
@@ -38,6 +47,7 @@ export const services = [
     category: 'Saç',
   },
   {
+    active: true,
     id: 'yuz-bakimi',
     name: 'Yüz Ağdası',
     description: 'Yüz çevresindeki istenmeyen tüyler için bölgesel ağda.',
@@ -66,6 +76,7 @@ const sundayShift = shift('11:00', '14:00', '14:45', '18:00');
 
 export const barbers = [
   {
+    active: true,
     id: 'emir',
     name: 'Emir Kaya',
     title: 'Kıdemli berber',
@@ -80,6 +91,7 @@ export const barbers = [
     },
   },
   {
+    active: true,
     id: 'kerem',
     name: 'Kerem Aydın',
     title: 'Berber',
@@ -93,6 +105,7 @@ export const barbers = [
     },
   },
   {
+    active: true,
     id: 'deniz',
     name: 'Deniz Arslan',
     title: 'Saç ve bakım uzmanı',
@@ -107,3 +120,5 @@ export const barbers = [
     },
   },
 ];
+
+export const defaultProfile = { shop, services, barbers };

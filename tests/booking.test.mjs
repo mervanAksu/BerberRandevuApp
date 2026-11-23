@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { openBookingDatabase } from '../scripts/database.mjs';
 import { createApiHandler } from '../server/api.mjs';
-import { services } from '../server/config.mjs';
+import { readProfile, saveProfile } from '../server/profile.mjs';
 
 const origin = 'https://makas.example';
 const tuesday = '2026-11-24';
@@ -186,31 +186,30 @@ test('either stale quote field prevents creation until the customer accepts the 
 test('a replay returns the saved price and duration after the catalog changes', async t => {
   const shop = bookingFixture(t);
   const selection = shop.selection();
-  const service = services.find(({ id }) => id === 'sac-kesimi');
+  const profile = await readProfile(shop.DB);
+  const service = profile.services.find(({ id }) => id === 'sac-kesimi');
   const { price, duration } = service;
-  const original = await shop.post(selection);
+  const original = await shop.post({ ...selection, profileRevision: profile.revision });
   assert.equal(original.status, 201);
   const receipt = await original.json();
   assert.equal(receipt.price, price);
   assert.equal(receipt.duration, duration);
 
-  try {
-    service.price = price + 100;
-    service.duration = duration + 15;
+  service.price += 100;
+  service.duration += 15;
+  await saveProfile(shop.DB, profile, new Date('2026-11-23T07:00:00Z'));
 
-    const replay = await shop.post({ ...selection, quotedPrice: price, quotedDuration: duration });
-    assert.equal(replay.status, 200);
-    assert.deepEqual(await replay.json(), receipt);
+  const replay = await shop.post({ ...selection, quotedPrice: price, quotedDuration: duration, profileRevision: profile.revision });
+  assert.equal(replay.status, 200);
+  assert.deepEqual(await replay.json(), receipt);
 
-    const next = await shop.post(shop.selection({ time: '11:00' }));
-    assert.equal(next.status, 201);
-    const updated = await next.json();
-    assert.equal(updated.price, service.price);
-    assert.equal(updated.duration, service.duration);
-  } finally {
-    service.price = price;
-    service.duration = duration;
-  }
+  const nextSelection = shop.selection({ time: '11:00' });
+  await expectCode(await shop.post({ ...nextSelection, profileRevision: profile.revision }), 409, 'PROFILE_CHANGED');
+  const next = await shop.post(nextSelection);
+  assert.equal(next.status, 201);
+  const updated = await next.json();
+  assert.equal(updated.price, service.price);
+  assert.equal(updated.duration, service.duration);
 });
 
 test('the booking rate window returns a rounded Retry-After and resets at its boundary', async t => {

@@ -1,4 +1,5 @@
 import { barbers, minutesSinceMidnight, services, shop } from './config.mjs';
+import { readProfile } from './profile.mjs';
 
 const slotStep = 15;
 const bookingDays = 30;
@@ -32,24 +33,33 @@ export function bookingWindow(now) {
   return { today, lastDate, currentMinute: Number(hour) * 60 + Number(minute) };
 }
 
-export function catalog(now) {
+export function catalog(now, profile) {
   const { today, lastDate } = bookingWindow(now);
+  const services = profile.services.filter(service => service.active !== false);
+  const offered = new Set(services.map(service => service.id));
   return {
-    shop,
+    shop: profile.shop,
     services,
-    barbers: barbers.map(({ id, name, title, serviceIds }) => ({ id, name, title, serviceIds })),
+    barbers: profile.barbers.filter(barber => barber.active !== false)
+      .map(({ id, name, title, serviceIds }) => ({ id, name, title, serviceIds: serviceIds.filter(id => offered.has(id)) })),
+    revision: profile.revision,
     today,
     lastDate,
   };
 }
 
-function appointmentDetails(selectedIds, barberId, date) {
-  if (!Array.isArray(selectedIds) || selectedIds.length === 0 || selectedIds.length > services.length ||
+function validateSelection(selectedIds) {
+  if (!Array.isArray(selectedIds) || selectedIds.length === 0 ||
       new Set(selectedIds).size !== selectedIds.length) {
     throw new ApiError(400, 'INVALID_SERVICE', 'Geçerli hizmetler seç.');
   }
+  if (selectedIds.length > 5) {
+    throw new ApiError(400, 'INVALID_SERVICE', 'Bir randevuda en fazla beş hizmet seçebilirsin.');
+  }
+}
 
-  const selection = services.filter(({ id }) => selectedIds.includes(id));
+function appointmentDetails(profile, selectedIds, barberId, date) {
+  const selection = profile.services.filter(service => service.active !== false && selectedIds.includes(service.id));
   if (selection.length !== selectedIds.length) {
     throw new ApiError(400, 'INVALID_SERVICE', 'Geçerli hizmetler seç.');
   }
@@ -58,7 +68,7 @@ function appointmentDetails(selectedIds, barberId, date) {
     throw new ApiError(400, 'SERVICE_CONFLICT', 'Saç & Sakal paketi zaten bu hizmeti içeriyor.');
   }
 
-  const barber = barbers.find(({ id }) => id === barberId);
+  const barber = profile.barbers.find(person => person.active !== false && person.id === barberId);
   if (!barber || !selectedIds.every((id) => barber.serviceIds.includes(id))) {
     throw new ApiError(400, 'INVALID_BARBER', 'Seçtiğin hizmetlere uygun bir berber seç.');
   }
@@ -73,7 +83,8 @@ function appointmentDetails(selectedIds, barberId, date) {
   const serviceIds = selection.map(({ id }) => id);
   const duration = selection.reduce((total, service) => total + service.duration, 0);
   const price = selection.reduce((total, service) => total + service.price, 0);
-  return { serviceIds, duration, price, barberId, date, shifts: barber.shifts[day.getUTCDay()] ?? [] };
+  return { serviceIds, serviceNames: selection.map(service => service.name), duration, price,
+    barberName: barber.name, shifts: barber.shifts[day.getUTCDay()] ?? [] };
 }
 
 function checkDateRange(date, window) {
@@ -93,7 +104,8 @@ function isUpcoming(date, minute, window) {
 }
 
 export async function availableSlots(db, { serviceIds, barberId, date }, now) {
-  const { duration, shifts } = appointmentDetails(serviceIds, barberId, date);
+  validateSelection(serviceIds);
+  const { duration, shifts } = appointmentDetails(await readProfile(db), serviceIds, barberId, date);
   const window = bookingWindow(now);
   checkDateRange(date, window);
 
@@ -145,7 +157,8 @@ function bookingInput(input, walkIn) {
   if (Object.hasOwn(input, 'serviceId') && Object.hasOwn(input, 'serviceIds')) {
     throw new ApiError(400, 'INVALID_SERVICE', 'Hizmet seçimini yeniden gönder.');
   }
-  const details = appointmentDetails(Object.hasOwn(input, 'serviceIds') ? serviceIds : [serviceId], barberId, date);
+  const selected = Object.hasOwn(input, 'serviceIds') ? serviceIds : [serviceId];
+  validateSelection(selected);
   if (typeof time !== 'string' || !/^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(time)) {
     throw new ApiError(400, 'INVALID_TIME', 'Geçerli bir saat seç.');
   }
@@ -157,10 +170,11 @@ function bookingInput(input, walkIn) {
 
   const start = minutesSinceMidnight(time);
   return {
-    ...details,
+    serviceIds: selected,
+    barberId,
+    date,
     time,
     start,
-    end: start + details.duration,
     walkIn,
     smsConsent: !walkIn && input.smsConsent === true,
     name: walkIn && !input.name ? 'Randevusuz müşteri' : customerName(input.name),
@@ -174,6 +188,8 @@ function confirmation({ reference, price, duration }, booking) {
     reference,
     price,
     duration,
+    barberName: booking.barberName,
+    serviceNames: booking.serviceNames,
     serviceIds: booking.serviceIds,
     ...(booking.serviceIds.length === 1 ? { serviceId: booking.serviceIds[0] } : {}),
     barberId: booking.barberId,
@@ -185,15 +201,16 @@ function confirmation({ reference, price, duration }, booking) {
 async function previousBooking(db, booking) {
   const existing = await db.prepare(`
     SELECT reference, price, end_minute - start_minute AS duration,
-           service_id, service_ids, barber_id, booking_date, start_minute,
+           service_id, service_ids, barber_id, barber_name, service_names, booking_date, start_minute,
            customer_name, customer_phone, walk_in, sms_consent, cancelled_at
     FROM bookings
     WHERE request_id = ?
   `).bind(booking.requestId).first();
 
   if (!existing) return null;
-  const previousServices = existing.service_ids ?? JSON.stringify([existing.service_id]);
-  if (Boolean(existing.sms_consent) !== booking.smsConsent || Boolean(existing.walk_in) !== booking.walkIn || previousServices !== JSON.stringify(booking.serviceIds) || existing.barber_id !== booking.barberId ||
+  const previousServices = existing.service_ids ? JSON.parse(existing.service_ids) : [existing.service_id];
+  if (Boolean(existing.sms_consent) !== booking.smsConsent || Boolean(existing.walk_in) !== booking.walkIn ||
+      previousServices.length !== booking.serviceIds.length || !previousServices.every(id => booking.serviceIds.includes(id)) || existing.barber_id !== booking.barberId ||
       existing.booking_date !== booking.date || existing.start_minute !== booking.start ||
       existing.customer_name !== booking.name || existing.customer_phone !== booking.phone) {
     throw new ApiError(409, 'REQUEST_ID_REUSED', 'Randevu bilgileri değişti. Seçimini yeniden gönder.');
@@ -201,14 +218,31 @@ async function previousBooking(db, booking) {
   if (existing.cancelled_at !== null) {
     throw new ApiError(409, 'BOOKING_CANCELLED', 'Bu randevu iptal edildi. Yeni bir saat seç.');
   }
-  return confirmation(existing, booking);
+  return confirmation(existing, { ...booking, ...bookedLabels(existing), serviceIds: previousServices });
+}
+
+// Bookings written before labels were persisted used the installation's original catalog.
+export function bookedLabels(row) {
+  const ids = row.service_ids ? JSON.parse(row.service_ids) : [row.service_id];
+  return {
+    barberName: row.barber_name ?? barbers.find(barber => barber.id === row.barber_id)?.name ?? row.barber_id,
+    serviceNames: row.service_names ? JSON.parse(row.service_names) : ids.map(id => services.find(service => service.id === id)?.name ?? id),
+  };
+}
+
+export function profileChanged() {
+  return new ApiError(409, 'PROFILE_CHANGED', 'Salon ayarları değişti. Güncel hizmet ve saatleri kontrol edip tekrar dene.');
 }
 
 export async function createBooking(db, input, now, { walkIn = false } = {}) {
-  const booking = bookingInput(input, walkIn);
-  const existing = await previousBooking(db, booking);
+  const selection = bookingInput(input, walkIn);
+  const existing = await previousBooking(db, selection);
   if (existing) return { confirmation: existing, created: false };
 
+  const profile = await readProfile(db);
+  if (input.profileRevision !== undefined && input.profileRevision !== profile.revision) throw profileChanged();
+  const booking = { ...selection, ...appointmentDetails(profile, selection.serviceIds, selection.barberId, selection.date) };
+  booking.end = booking.start + booking.duration;
   const { quotedPrice, quotedDuration } = input;
   if ((quotedPrice !== undefined && quotedPrice !== booking.price) ||
       (quotedDuration !== undefined && quotedDuration !== booking.duration)) {
@@ -233,15 +267,17 @@ export async function createBooking(db, input, now, { walkIn = false } = {}) {
     inserted = await db.prepare(`
       INSERT INTO bookings (
         reference, request_id, service_id, service_ids, barber_id, booking_date, start_minute,
-        end_minute, price, customer_name, customer_phone, walk_in, sms_consent, created_at
+        end_minute, price, customer_name, customer_phone, walk_in, sms_consent, created_at, barber_name, service_names
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM bookings WHERE request_id = ?)
+        AND (SELECT revision FROM salon_profile WHERE id = 1) = ?
       RETURNING reference, price, end_minute - start_minute AS duration
     `).bind(
       reference, booking.requestId, booking.serviceIds[0], serviceList, booking.barberId, booking.date,
       booking.start, booking.end, booking.price, booking.name, booking.phone,
-      Number(walkIn), Number(booking.smsConsent), now.getTime(), booking.requestId,
+      Number(walkIn), Number(booking.smsConsent), now.getTime(), booking.barberName, JSON.stringify(booking.serviceNames),
+      booking.requestId, profile.revision,
     ).first();
   } catch (error) {
     if (error instanceof Error && error.message.includes('booking_overlap')) {
@@ -253,6 +289,6 @@ export async function createBooking(db, input, now, { walkIn = false } = {}) {
   if (inserted) return { confirmation: confirmation(inserted, booking), created: true };
 
   const retried = await previousBooking(db, booking);
-  if (!retried) throw new Error('Booking disappeared during retry');
+  if (!retried) throw profileChanged();
   return { confirmation: retried, created: false };
 }

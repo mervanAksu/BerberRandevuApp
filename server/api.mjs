@@ -1,3 +1,4 @@
+import { readProfile } from './profile.mjs';
 import { reminderJob } from './jobs.mjs';
 import { handleOwner } from './owner.mjs';
 import { handleCancel, makeCancelPath } from './cancel.mjs';
@@ -25,7 +26,7 @@ export function requireMethod(request, method) {
   }
 }
 
-export function checkBookingHeaders(request, url) {
+export function checkBookingHeaders(request, url, limit = maxBodyBytes) {
   const origin = request.headers.get('origin');
   if ((origin !== null && origin !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
     throw new ApiError(403, 'INVALID_ORIGIN', 'Bu kaynaktan randevu gönderilemez.');
@@ -37,15 +38,15 @@ export function checkBookingHeaders(request, url) {
   }
 
   const length = request.headers.get('content-length');
-  if (length !== null && (!/^\d+$/.test(length) || Number(length) > maxBodyBytes)) {
+  if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) {
     throw new ApiError(413, 'BODY_TOO_LARGE', 'Randevu isteği çok büyük.');
   }
 }
 
-export async function bookingBody(request) {
+export async function bookingBody(request, limit = maxBodyBytes) {
   if (!request.body) throw new ApiError(400, 'INVALID_JSON', 'Randevu bilgileri okunamadı.');
 
-  const bytes = new Uint8Array(maxBodyBytes);
+  const bytes = new Uint8Array(limit);
   const reader = request.body.getReader();
   let length = 0;
   try {
@@ -143,7 +144,7 @@ export function createApiHandler(clock = () => new Date()) {
           return await reminderJob(request, env);
         case '/api/catalog':
           requireMethod(request, 'GET');
-          return json({ ...catalog(clock()), smsAvailable: env.SMS_ENABLED === 'true' && Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_SENDER_ID) });
+          return json({ ...catalog(clock(), await readProfile(env.DB)), smsAvailable: env.SMS_ENABLED === 'true' && Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_SENDER_ID) });
         case '/api/slots': {
           requireMethod(request, 'GET');
           const { searchParams } = url;

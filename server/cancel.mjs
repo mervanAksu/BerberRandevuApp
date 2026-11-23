@@ -1,13 +1,8 @@
-import { ApiError } from './booking.mjs';
-import { barbers, services, shop } from './config.mjs';
+import { ApiError, bookedLabels, bookingWindow, timeLabel } from './booking.mjs';
 
 const encoder = new TextEncoder();
 const tokenPattern = /^(MKS-[0-9A-F]{12})\.([A-Za-z0-9_-]{42}[AEIMQUYcgkosw048])$/;
 const maxBodyBytes = 512;
-const localTime = new Intl.DateTimeFormat('en-CA', {
-  timeZone: shop.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-});
 
 function toBase64Url(bytes) {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
@@ -106,7 +101,7 @@ async function bookingForToken(db, token) {
   if (!match) throw invalid();
   const [, reference, signature] = match;
   const row = await db.prepare(`
-    SELECT reference, request_id, service_id, service_ids, barber_id, booking_date, start_minute, cancelled_at
+    SELECT reference, request_id, service_id, service_ids, service_names, barber_id, barber_name, booking_date, start_minute, cancelled_at
     FROM bookings WHERE reference = ?
   `).bind(reference).first();
   const secret = await cancelSecret(db);
@@ -119,28 +114,16 @@ async function bookingForToken(db, token) {
   return row;
 }
 
-function localCutoff(now) {
-  const { year, month, day, hour, minute } = Object.fromEntries(
-    localTime.formatToParts(now).map(({ type, value }) => [type, value]),
-  );
-  return { date: `${year}-${month}-${day}`, minute: Number(hour) * 60 + Number(minute) };
-}
-
-function timeLabel(minute) {
-  const hour = String(Math.floor(minute / 60)).padStart(2, '0');
-  return `${hour}:${String(minute % 60).padStart(2, '0')}`;
-}
-
 function preview(row, cutoff) {
-  const future = row.booking_date > cutoff.date ||
-    (row.booking_date === cutoff.date && row.start_minute > cutoff.minute);
-  const serviceIds = row.service_ids === null ? [row.service_id] : JSON.parse(row.service_ids);
+  const future = row.booking_date > cutoff.today ||
+    (row.booking_date === cutoff.today && row.start_minute > cutoff.currentMinute);
+  const { barberName, serviceNames } = bookedLabels(row);
   return {
     reference: row.reference,
     date: row.booking_date,
     time: timeLabel(row.start_minute),
-    barber: barbers.find(barber => barber.id === row.barber_id)?.name ?? row.barber_id,
-    services: serviceIds.map(id => services.find(service => service.id === id)?.name ?? id),
+    barber: barberName,
+    services: serviceNames,
     status: row.cancelled_at !== null ? 'cancelled' : future ? 'active' : 'past',
   };
 }
@@ -157,7 +140,7 @@ export async function handleCancel(request, env, now = new Date()) {
     throw new ApiError(400, 'CONFIRMATION_REQUIRED', 'Randevunu iptal etmek için onay ver.');
   }
   const row = await bookingForToken(env.DB, input.token);
-  const cutoff = localCutoff(now);
+  const cutoff = bookingWindow(now);
   let result = preview(row, cutoff);
   if (confirm && result.status === 'active') {
     const cancelled = await env.DB.prepare(`
@@ -165,7 +148,7 @@ export async function handleCancel(request, env, now = new Date()) {
       WHERE reference = ? AND request_id = ? AND cancelled_at IS NULL
         AND (booking_date > ? OR (booking_date = ? AND start_minute > ?))
       RETURNING cancelled_at
-    `).bind(now.getTime(), row.reference, row.request_id, cutoff.date, cutoff.date, cutoff.minute).first();
+    `).bind(now.getTime(), row.reference, row.request_id, cutoff.today, cutoff.today, cutoff.currentMinute).first();
     if (cancelled) result.status = 'cancelled';
     else result = preview(await bookingForToken(env.DB, input.token), cutoff);
   }

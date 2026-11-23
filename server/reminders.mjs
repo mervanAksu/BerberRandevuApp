@@ -1,6 +1,6 @@
 import { timeLabel } from './booking.mjs';
 import { makeCancelPath } from './cancel.mjs';
-import { shop } from './config.mjs';
+import { readProfile } from './profile.mjs';
 
 const minute = 60_000;
 const hour = 60 * minute;
@@ -68,6 +68,7 @@ export async function processReminders(env, { now = Date.now, fetcher = fetch } 
   if (env.SMS_ENABLED !== 'true') return counts;
   const config = smsConfiguration(env);
   const db = env.DB;
+  const { shop } = await readProfile(db);
   const runAt = now();
   const { results: due } = await db.prepare(`
     WITH upcoming AS (
