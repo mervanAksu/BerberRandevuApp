@@ -22,7 +22,7 @@ export class ApiError extends Error {
   }
 }
 
-function bookingWindow(now) {
+export function bookingWindow(now) {
   const { year, month, day, hour, minute } = Object.fromEntries(
     localTime.formatToParts(now).map(({ type, value }) => [type, value]),
   );
@@ -82,7 +82,7 @@ function checkDateRange(date, window) {
   }
 }
 
-function timeLabel(minute) {
+export function timeLabel(minute) {
   const hourLabel = String(Math.floor(minute / 60)).padStart(2, '0');
   const minuteLabel = String(minute % 60).padStart(2, '0');
   return `${hourLabel}:${minuteLabel}`;
@@ -103,8 +103,10 @@ export async function availableSlots(db, { serviceIds, barberId, date }, now) {
     SELECT start_minute, end_minute
     FROM bookings
     WHERE barber_id = ? AND booking_date = ? AND cancelled_at IS NULL
+    UNION ALL
+    SELECT start_minute, end_minute FROM staff_blocks WHERE barber_id = ? AND booking_date = ?
     ORDER BY start_minute
-  `).bind(barberId, date).all();
+  `).bind(barberId, date, barberId, date).all();
 
   const slots = [];
   for (const [open, close] of shifts) {
@@ -138,7 +140,7 @@ function customerPhone(value) {
   return `+90${domesticNumber}`;
 }
 
-function bookingInput(input) {
+function bookingInput(input, walkIn) {
   const { serviceId, serviceIds, barberId, date, time } = input;
   if (Object.hasOwn(input, 'serviceId') && Object.hasOwn(input, 'serviceIds')) {
     throw new ApiError(400, 'INVALID_SERVICE', 'Hizmet seçimini yeniden gönder.');
@@ -159,8 +161,10 @@ function bookingInput(input) {
     time,
     start,
     end: start + details.duration,
-    name: customerName(input.name),
-    phone: customerPhone(input.phone),
+    walkIn,
+    smsConsent: !walkIn && input.smsConsent === true,
+    name: walkIn && !input.name ? 'Randevusuz müşteri' : customerName(input.name),
+    phone: walkIn && !input.phone ? null : customerPhone(input.phone),
     requestId,
   };
 }
@@ -182,14 +186,14 @@ async function previousBooking(db, booking) {
   const existing = await db.prepare(`
     SELECT reference, price, end_minute - start_minute AS duration,
            service_id, service_ids, barber_id, booking_date, start_minute,
-           customer_name, customer_phone, cancelled_at
+           customer_name, customer_phone, walk_in, sms_consent, cancelled_at
     FROM bookings
     WHERE request_id = ?
   `).bind(booking.requestId).first();
 
   if (!existing) return null;
   const previousServices = existing.service_ids ?? JSON.stringify([existing.service_id]);
-  if (previousServices !== JSON.stringify(booking.serviceIds) || existing.barber_id !== booking.barberId ||
+  if (Boolean(existing.sms_consent) !== booking.smsConsent || Boolean(existing.walk_in) !== booking.walkIn || previousServices !== JSON.stringify(booking.serviceIds) || existing.barber_id !== booking.barberId ||
       existing.booking_date !== booking.date || existing.start_minute !== booking.start ||
       existing.customer_name !== booking.name || existing.customer_phone !== booking.phone) {
     throw new ApiError(409, 'REQUEST_ID_REUSED', 'Randevu bilgileri değişti. Seçimini yeniden gönder.');
@@ -200,8 +204,8 @@ async function previousBooking(db, booking) {
   return confirmation(existing, booking);
 }
 
-export async function createBooking(db, input, now) {
-  const booking = bookingInput(input);
+export async function createBooking(db, input, now, { walkIn = false } = {}) {
+  const booking = bookingInput(input, walkIn);
   const existing = await previousBooking(db, booking);
   if (existing) return { confirmation: existing, created: false };
 
@@ -213,8 +217,12 @@ export async function createBooking(db, input, now) {
 
   const window = bookingWindow(now);
   checkDateRange(booking.date, window);
+  const currentQuarter = Math.floor(window.currentMinute / slotStep) * slotStep;
+  const startsNow = walkIn && booking.date === window.today && booking.start === currentQuarter;
+  // A customer arriving mid-quarter still needs the full service before the next appointment.
+  if (startsNow && booking.start < window.currentMinute) booking.end += slotStep;
   const fitsShift = booking.shifts.some(([open, close]) => booking.start >= open && booking.end <= close);
-  if (!fitsShift || !isUpcoming(booking.date, booking.start, window)) {
+  if (!fitsShift || (!startsNow && !isUpcoming(booking.date, booking.start, window))) {
     throw new ApiError(409, 'SLOT_UNAVAILABLE', 'Bu saat uygun değil. Başka bir saat seç.');
   }
 
@@ -225,15 +233,15 @@ export async function createBooking(db, input, now) {
     inserted = await db.prepare(`
       INSERT INTO bookings (
         reference, request_id, service_id, service_ids, barber_id, booking_date, start_minute,
-        end_minute, price, customer_name, customer_phone, created_at
+        end_minute, price, customer_name, customer_phone, walk_in, sms_consent, created_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM bookings WHERE request_id = ?)
       RETURNING reference, price, end_minute - start_minute AS duration
     `).bind(
       reference, booking.requestId, booking.serviceIds[0], serviceList, booking.barberId, booking.date,
       booking.start, booking.end, booking.price, booking.name, booking.phone,
-      now.getTime(), booking.requestId,
+      Number(walkIn), Number(booking.smsConsent), now.getTime(), booking.requestId,
     ).first();
   } catch (error) {
     if (error instanceof Error && error.message.includes('booking_overlap')) {
