@@ -4,33 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f9f7f0">
-  <meta name="description" content="Makas Moda berber salonunda hizmetini, berberini ve sana uygun saati seçerek randevu al.">
-  <title>Makas · Moda Berber Salonu</title>
-  <link rel="icon" href="/mark.svg" type="image/svg+xml">
+  <meta name="description" content="Hizmetini, berberini ve sana uygun saati seçerek randevu al.">
+  <title>Berber randevusu</title>
+  <link rel="icon" data-shop-logo>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
-<body>
+<body data-page-title="Randevu">
   <a class="skip" href="#randevu">Randevuya geç</a>
   <header class="masthead">
     <div class="frame masthead-inner">
-      <a class="logo" href="#ust" aria-label="Makas, sayfa başı"><img src="/mark.svg" alt="" width="35" height="40"><span>Makas<span class="logo-dot">.</span></span></a>
+      <a class="logo" href="#ust" aria-label="Sayfa başına dön"><img data-shop-logo alt="" width="35" height="40"><span><span data-shop-name>Salon</span><span class="logo-dot">.</span></span></a>
       <nav aria-label="Ana menü">
         <a class="nav-book" href="#randevu">Randevu</a>
         <button class="text-link salon-trigger" type="button">Salon hakkında</button>
       </nav>
-      <span class="header-location"><svg class="icon" aria-hidden="true"><use href="/icons.svg#pin"></use></svg>Moda, İstanbul</span>
+      <span class="header-location"><svg class="icon" aria-hidden="true"><use href="/icons.svg#pin"></use></svg><span data-shop-location></span></span>
     </div>
   </header>
   <main id="ust">
     <section class="hero frame" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <div class="eyebrow"><span class="red-rule" aria-hidden="true"></span>MODA BERBER SALONU</div>
+        <div class="eyebrow"><span class="red-rule" aria-hidden="true"></span><span data-shop-name>Berber salonu</span></div>
         <h1 id="hero-title">Koltuğun<br><em>hazır.</em></h1>
         <p>Hizmetini ve berberini seç, sana uygun saatte koltuğuna otur.</p>
         <a class="primary hero-book" href="#randevu"><svg class="icon" aria-hidden="true"><use href="/icons.svg#calendar"></use></svg>Randevu al</a>
       </div>
-      <div class="hero-image"><img src="/media/salon.webp" fetchpriority="high" alt="Güneş alan bir berber salonunda aynanın önündeki deri koltuk" width="1100" height="750"></div>
+      <div class="hero-image"><img data-shop-image fetchpriority="high" alt="" width="1100" height="750"></div>
     </section>
     <section class="booking frame" id="randevu" aria-labelledby="booking-heading">
       <header class="booking-header">
@@ -42,13 +42,13 @@
       <div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
     </section>
   </main>
-  <footer class="footer"><div class="frame footer-inner"><a class="footer-word" href="#ust" aria-label="Makas, sayfa başı">Makas<span>.</span></a><span>Moda, Kadıköy · İstanbul</span><a class="text-link" href="/isletme">İşletme paneli</a></div></footer>
+  <footer class="footer"><div class="frame footer-inner"><a class="footer-word" href="#ust" aria-label="Sayfa başına dön"><span data-shop-name>Salon</span><span class="accent">.</span></a><span data-shop-location></span><a class="text-link" href="/isletme">İşletme paneli</a></div></footer>
   <dialog id="salon-dialog" aria-labelledby="salon-title">
     <button type="button" class="close" id="salon-close" aria-label="Kapat"><svg class="icon" aria-hidden="true"><use href="/icons.svg#close"></use></svg></button>
     <p class="eyebrow"><span class="red-rule" aria-hidden="true"></span>SALON HAKKINDA</p>
-    <h2 id="salon-title">Makas<span class="accent">.</span></h2>
-    <p class="salon-location"><svg class="icon" aria-hidden="true"><use href="/icons.svg#pin"></use></svg><span id="shop-location">Moda, Kadıköy · İstanbul</span></p>
-    <p>Bu örnek salonun hizmetlerini ve berberlerini inceleyebilir, takvimdeki bir saate deneme randevusu oluşturabilirsin.</p>
+    <h2 id="salon-title"><span data-shop-name>Salon</span><span class="accent">.</span></h2>
+    <p class="salon-location"><svg class="icon" aria-hidden="true"><use href="/icons.svg#pin"></use></svg><span data-shop-location></span></p>
+    <p data-shop-description hidden></p>
     <button id="salon-book" class="primary" type="button">Randevuya geç</button>
   </dialog>
 </body>

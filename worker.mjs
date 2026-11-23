@@ -1,3 +1,4 @@
+import { readProfile } from './server/profile.mjs';
 import { handleApi } from './server/api.mjs';
 
 const mediaTypes = {
@@ -41,6 +42,27 @@ export function createBookingApp(readAsset) {
         status: 405,
         headers: { ...securityHeaders, Allow: 'GET, HEAD' },
       });
+    }
+
+    if (pathname === '/owner.webmanifest') {
+      const headers = {
+        ...securityHeaders, 'Cache-Control': 'no-cache', 'Content-Type': 'application/manifest+json',
+      };
+      try {
+        const { shop } = await readProfile(env.DB);
+        const icons = [192, 512].map(size => ({
+          src: `/owner-icon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png',
+        }));
+        if (shop.logoPath && shop.logoPath !== '/mark.svg') icons.unshift({ src: shop.logoPath });
+        const manifest = {
+          name: `${shop.name} İşletme`, short_name: shop.name, lang: 'tr',
+          start_url: '/isletme', scope: '/', display: 'standalone',
+          background_color: '#f7f5ee', theme_color: '#182d27', icons,
+        };
+        return new Response(request.method === 'HEAD' ? null : JSON.stringify(manifest), { headers });
+      } catch {
+        return new Response(null, { status: 503, headers: { ...headers, 'Cache-Control': 'no-store' } });
+      }
     }
 
     const pages = { '/': '/index.html', '/isletme': '/isletme.html', '/isletme/': '/isletme.html' };

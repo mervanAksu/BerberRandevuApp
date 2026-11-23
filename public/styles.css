@@ -31,12 +31,12 @@ h1,h2,.display{font-family:var(--display);font-weight:400}
 .sr-only,.skip:not(:focus){position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);clip-path:inset(50%);white-space:nowrap}
 .skip:focus{position:fixed;z-index:10;top:1rem;left:1rem;padding:.5rem .8rem;background:var(--ink);color:white}
 .masthead{border-bottom:1px solid var(--rule)}
-.masthead-inner{height:4.7rem;display:flex;align-items:center;gap:3rem}
+.masthead-inner{min-height:4.7rem;display:flex;align-items:center;gap:3rem}
 .logo,.footer-word{font:400 2.75rem/.95 var(--display);letter-spacing:-.07em}
 .logo{display:inline-flex;gap:.35rem;align-items:center;margin-right:auto}
-.logo img{width:1.75rem;height:2.2rem}
+.logo img{width:1.75rem;height:2.2rem;object-fit:contain;flex:none}
 .logo>span{padding-bottom:.2rem}
-.logo-dot,.footer-word span,.accent{color:var(--rust)}
+.logo-dot,.accent{color:var(--rust)}
 .masthead nav{display:flex;align-items:center;gap:1.8rem;font-size:.9375rem;font-weight:550}
 .masthead nav>*{padding-block:.35rem}
 .text-link:hover,.nav-book:hover{color:var(--rust)}
@@ -180,7 +180,7 @@ dialog .primary{margin-top:1.2rem}
 }
 @media(max-width:600px){
   .frame{width:calc(100% - 2.4rem)}
-  .masthead-inner{height:4.05rem;gap:1rem}
+  .masthead-inner{min-height:4.05rem;gap:1rem}
   .logo{font-size:2.25rem}
   .logo img{width:1.4rem;height:1.85rem}
   .masthead nav{gap:1rem;font-size:.86rem}
@@ -243,3 +243,9 @@ dialog .primary{margin-top:1.2rem}
 .confirmation-actions,.cancel-actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1rem}
 .cancel-heading{font:400 clamp(2.1rem,5vw,3.2rem)/1.05 var(--display);margin:0}
 .cancel-actions [hidden]{display:none}
+
+.hero .eyebrow [data-shop-name]{text-transform:uppercase}
+.logo{min-width:0}
+.logo>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.15}
+.masthead nav{flex-shrink:0}
+.footer-word,.option-name,[data-shop-name],[data-shop-description],[data-shop-location]{overflow-wrap:anywhere}

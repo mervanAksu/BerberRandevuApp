@@ -1,6 +1,6 @@
 # BerberRandevuApp ile çalışma
 
-Bu repo, bağımsız bir berber salonunun müşteriye açık randevu akışını barındırır. Müşteri metinleri Türkçedir. Demo salon Moda'daki kurgusal Makas'tır. Yeni salon kurulumunda hizmetleri, süreleri, fiyatları ve vardiyaları sunucu kataloğunda değiştirin.
+Bu repo, bağımsız bir berber salonunun müşteriye açık randevu akışını barındırır. Müşteri metinleri Türkçedir. Demo salon Moda'daki kurgusal Makas'tır. Yeni salon kurulumunda işletmeci panelinden salon profilini, hizmetleri, süreleri, fiyatları ve vardiyaları kaydedin. Sunucu ve arayüzde aynı profili kullanın.
 
 ## Görev dağılımı
 

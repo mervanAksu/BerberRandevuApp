@@ -36,7 +36,11 @@ npm run bookings -- cancel MKS-ABCDEF012345
 
 ## Salon kurulumu
 
-Demoyu denerken örnek müşteri bilgileri kullanın. Gerçek müşteri kaydına başlamadan önce her salon için ayrı bir kurulum ve veritabanı oluşturun. Salon kimliğini, hizmetleri, TL fiyatlarını, süreleri, berberleri ve vardiyaları [server/config.mjs](server/config.mjs) üzerinden düzenleyin. [public/index.html](public/index.html) içindeki salon metinlerini ve [temsili salon görselini](public/media/salon.webp) kendi içeriklerinizle güncelleyin. Barındırılan kurulumda yeni D1 veritabanını `DB` olarak bağlayın ve [drizzle/](drizzle/) şema geçişlerini uygulayın.
+Demo salonla deneme yaparken örnek müşteri bilgileri kullanın. Yeni bir dükkân için aynı kod sürümünü ayrı bir veritabanı ve ayrı işletme parolasıyla kurun. Barındırılan kurulumda yeni D1 veritabanını `DB` olarak bağlayın ve [drizzle/](drizzle/) altındaki şema geçişlerini uygulayın.
+
+İlk açılışta [varsayılan salon profili](server/config.mjs) yüklenir. Telefonda `/isletme` adresinden giriş yapıp **Salon ayarları** bölümünü açın. Salonun görünen adını, konumunu ve açıklamasını girin. Gerçek salon kurulumunda demo bilgisini kapatın. İşletmeye özel görseller dağıtıma `public/media/` altında eklenir. Kaydedilen salon profili o kurulumun veritabanında tutulur ve yayımlanan kod güncellemelerinde korunur.
+
+Hizmetin fiyatını ve süresini belirleyin, çalışanı ekleyip yapabildiği hizmetleri ve haftalık saatlerini tanımlayın. Öğle arasını iki çalışma aralığı arasında boşluk bırakarak girin. Tek bir güne özel izin için ajandada saat kapatın. Önceden onaylanan randevunun ücreti ve ayırdığı süre korunur. Bir vardiya değişikliği veya pasife alma mevcut randevuyu geçersiz kılacaksa panel çakışan saati bildirir.
 
 Müşteri kaydı açmadan önce HTTPS'yi doğrulayın, veritabanı ve yedek erişimlerini sınırlandırın. Müşteriye gösterilecek aydınlatma metnini ve kayıtların saklama ve silme sürecini işletmeyle belirleyin. Gerçek müşteri verisini ve gizli anahtarları repoya eklemeyin.
 

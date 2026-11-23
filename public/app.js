@@ -1,3 +1,5 @@
+import { applySalonBrand } from './branding.js';
+
 const app = document.getElementById('booking-app');
 const announcer = document.getElementById('announcer');
 const titles = ['Hizmet', 'Berber', 'Tarih', 'Saat', 'Bilgiler'];
@@ -174,11 +176,12 @@ function actions(content, allowed = true, nextLabel = 'Devam et') {
 }
 
 function conflictingService(id) {
+  if (draft.serviceIds.length >= 5) return 'Bir randevuda en fazla beş hizmet seçebilirsin.';
   const parts = ['sac-kesimi', 'sakal-tirasi'];
   if (id === 'sac-sakal' && parts.some(part => draft.serviceIds.includes(part))) {
     return 'Paketi seçmek için ayrı kesim veya tıraş seçimini kaldır.';
   }
-  if (parts.includes(id) && draft.serviceIds.includes('sac-sakal')) return 'Seçtiğin Saç & Sakal paketine dahil.';
+  if (parts.includes(id) && draft.serviceIds.includes('sac-sakal')) return 'Seçtiğin pakete dahil.';
   if (!qualified([...draft.serviceIds, id]).length) return 'Seçili hizmetlerle birlikte sunan berber yok.';
   return '';
 }
@@ -186,6 +189,10 @@ function conflictingService(id) {
 function servicesStep(panel) {
   if (quoteNotice) panel.append(alertBox(quoteNotice));
   const group = element('div', 'option-list');
+  if (!catalog.services.length || !catalog.barbers.length) {
+    panel.append(element('p', 'notice', 'Salon şu anda internetten randevu almıyor.'));
+    return;
+  }
   for (const service of catalog.services) {
     const selected = draft.serviceIds.includes(service.id);
     const reason = selected ? '' : conflictingService(service.id);
@@ -354,8 +361,8 @@ function field(name, title, type, placeholder, maxLength) {
 
 function detailsStep(panel) {
   const form = element('form', 'booking-form');
-  const note = element('p', 'notice', 'Burası örnek bir salon. Deneme randevusu için örnek ad ve telefon kullan.');
-  form.append(note, field('name', 'Ad soyad', 'text', 'Ör. Deniz Örnek', 80),
+  if (catalog.shop.isDemo) form.append(element('p', 'notice', 'Burası örnek bir salon. Deneme randevusu için örnek ad ve telefon kullan.'));
+  form.append(field('name', 'Ad soyad', 'text', 'Ör. Deniz Örnek', 80),
     field('phone', 'Telefon numarası', 'tel', '05XX XXX XX XX', 64));
   const consent = element('label', 'sms-consent');
   const checkbox = element('input');
@@ -406,10 +413,10 @@ function confirmation() {
   heading.id = 'step-heading';
   heading.tabIndex = -1;
   const rows = element('dl');
-  rows.append(readOnlyRow('Randevu kodu', result.reference), readOnlyRow('Hizmet', serviceNames()),
-    readOnlyRow('Berber', barber().name), readOnlyRow('Tarih ve saat', dateLabel(result.date) + ' · ' + result.time),
+  rows.append(readOnlyRow('Randevu kodu', result.reference), readOnlyRow('Hizmet', result.serviceNames?.join(', ') ?? serviceNames()),
+    readOnlyRow('Berber', result.barberName ?? barber()?.name), readOnlyRow('Tarih ve saat', dateLabel(result.date) + ' · ' + result.time),
     readOnlyRow('Süre', result.duration + ' dakika'), readOnlyRow('Toplam', currency.format(result.price)));
-  panel.append(badge, heading, element('p', 'subtle', 'Deneme randevunun kodunu ve ayrıntılarını aşağıda bulabilirsin.'), rows);
+  panel.append(badge, heading, element('p', 'subtle', 'Randevunun kodunu ve ayrıntılarını aşağıda bulabilirsin.'), rows);
   const actions = element('div', 'confirmation-actions');
   if (result.cancelPath) {
     const link = element('a', 'secondary', 'İptal bağlantısı');
@@ -492,6 +499,10 @@ async function loadDates(focus = false) {
   const responses = await Promise.allSettled(days.map(day => queryDay(day, signal)));
   if (signal.aborted) return;
   checking = false;
+  if (responses.some(response => response.status === 'rejected' && staleCatalog(response.reason))) {
+    await restartWithCatalog();
+    return;
+  }
   responses.forEach((response, i) => {
     if (response.status === 'fulfilled') dateChecks.set(days[i], response.value);
     else loadError = 'Bazı günlerin müsaitliği alınamadı. Tekrar deneyebilir veya gün seçerek saatleri kontrol edebilirsin.';
@@ -516,6 +527,11 @@ async function loadTimes(focus = false) {
     }
   } catch (error) {
     if (signal.aborted) return;
+    if (staleCatalog(error)) {
+      checking = false;
+      await restartWithCatalog();
+      return;
+    }
     loadError = error.code ? error.message : 'Müsait saatler alınamadı. Bağlantını kontrol edip tekrar dene.';
   }
   checking = false;
@@ -538,7 +554,7 @@ async function save() {
   const { serviceIds, barberId, date, time, name, phone, smsConsent } = draft;
   if (!draft.requestId) draft.requestId = crypto.randomUUID();
   const payload = { serviceIds, barberId, date, time, name, phone, smsConsent, requestId: draft.requestId,
-    quotedPrice: price(), quotedDuration: duration() };
+    profileRevision: catalog.revision, quotedPrice: price(), quotedDuration: duration() };
   formError = '';
   formErrorField = '';
   submitting = true;
@@ -550,13 +566,8 @@ async function save() {
     render(true);
   } catch (error) {
     submitting = false;
-    if (error.code === 'QUOTE_CHANGED') {
-      draft.serviceIds = [];
-      draft.barberId = '';
-      draft.step = 0;
-      resetSchedule();
-      quoteNotice = 'Hizmetlerin fiyatı veya süresi değişti. Güncel bilgileri inceleyip seçimini yeniden yap.';
-      loadCatalog(true);
+    if (staleCatalog(error)) {
+      await restartWithCatalog();
     } else if (['SLOT_TAKEN', 'SLOT_UNAVAILABLE', 'BOOKING_CANCELLED'].includes(error.code)) {
       draft.time = draft.requestId = '';
       draft.step = 3;
@@ -573,11 +584,24 @@ async function save() {
   }
 }
 
+function staleCatalog(error) {
+  return ['PROFILE_CHANGED', 'QUOTE_CHANGED', 'INVALID_SERVICE', 'INVALID_BARBER'].includes(error?.code);
+}
+
+function restartWithCatalog() {
+  draft.serviceIds = [];
+  draft.barberId = '';
+  draft.step = 0;
+  resetSchedule();
+  quoteNotice = 'Salon bilgileri güncellendi. Hizmetleri, fiyatları ve süreleri yeniden inceleyip seçim yap.';
+  return loadCatalog(true);
+}
+
 async function loadCatalog(focus = false) {
   app.setAttribute('aria-busy', 'true');
   try {
     catalog = await request('/api/catalog');
-    document.getElementById('shop-location').textContent = catalog.shop.location;
+    applySalonBrand(catalog.shop);
     render(focus === true);
   } catch {
     app.replaceChildren(alertBox('Hizmet listesi yüklenemedi. Bağlantını kontrol edip tekrar dene.', loadCatalog));

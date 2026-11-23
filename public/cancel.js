@@ -1,3 +1,5 @@
+import { applySalonBrand } from './branding.js';
+
 const token = location.hash.slice(1);
 const status = document.getElementById('cancel-status');
 const details = document.getElementById('cancel-details');
@@ -84,3 +86,8 @@ async function load(confirm = false) {
 confirmButton.addEventListener('click', () => void load(true));
 retryButton.addEventListener('click', () => void load());
 void load();
+
+fetch('/api/catalog', { cache: 'no-store' })
+  .then(response => response.ok ? response.json() : null)
+  .then(catalog => applySalonBrand(catalog?.shop))
+  .catch(() => {}); // The cancellation link still works when branding is unavailable.
