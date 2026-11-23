@@ -1,6 +1,6 @@
 # Randevu ve müşteri verisinin korunması
 
-Bu uygulamanın müşteri tarafındaki yetkileri hizmetleri, çalışanları ve boş saatleri okumak ve bir randevu oluşturmaktır. Ad ve telefon sunucuya gönderilir. Başka bir müşterinin randevu kaydını okuyan bir müşteri uç noktası yoktur.
+Müşteri hizmetleri, çalışanları ve boş saatleri okuyabilir, randevu oluşturabilir ve kendi gizli bağlantısıyla başlamamış randevusunu iptal edebilir. Ad ve telefon sunucuya gönderilir. Başka bir müşterinin randevu kaydını okuyan bir müşteri uç noktası yoktur.
 
 | Durum | Koruma | Doğrulama |
 | --- | --- | --- |
@@ -9,6 +9,10 @@ Bu uygulamanın müşteri tarafındaki yetkileri hizmetleri, çalışanları ve 
 | Tarayıcı eski veya değiştirilmiş seçimler gönderir | Sunucu hizmeti, personel yetkinliğini, vardiyayı, süreyi ve geçerli tarih aralığını kendi kataloğundan doğrular. | Randevu kural testleri uygunsuz kombinasyonları ve çakışan aralıkları kapsar. |
 | İstek gövdesi gereksiz yere büyür veya başka bir sayfadan gönderilir | Kayıt yalnızca sınırlı boyuttaki JSON isteklerini kabul eder. Tarayıcı bir kaynak bildirdiğinde sunucu kendi kaynağıyla karşılaştırır. | HTTP testleri farklı kaynak için 403, büyük gövde için 413, yanlış içerik türü için 415 bekler. |
 | İletişim bilgileri herkese açık bir yanıta girer | Müsaitlik yanıtı yalnızca saatleri döndürür. Kayıt yanıtı, müşteri adı ve telefonu içermez. SQL sorgularında değerler parametre olarak bağlanır. | HTTP testleri onay yanıtının alanlarını, randevu listesine ve sunucu dosyalarına erişimi kontrol eder. |
+
+## Yetki sınırları
+
+Salon sahibine ait gündem, iletişim bilgileri ve değişiklikler sunucuda yetkilendirilir. Sites üzerinde doğrulanmış sahip kimliği, bağımsız kurulumda ise süreli HttpOnly oturum kullanılır. Müşterinin iptal bağlantısı tek randevuya yetki verir. Bağlantıdaki imza tarayıcı fragmentinde taşınır ve sunucuya yalnızca iptal sayfasının JSON isteğinde iletilir. İptal önizlemesi iletişim bilgilerini döndürmez. SMS görevi için ayrı, yalnızca hatırlatmaları çalıştırabilen bir kimlik bilgisi kullanılır.
 
 ## İşletme kurulumu
 

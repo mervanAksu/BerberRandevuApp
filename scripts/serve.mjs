@@ -57,6 +57,7 @@ export async function startBookingServer({
   port = process.env.PORT ?? 4173,
   databaseFile,
   rateLimitSecret = process.env.RATE_LIMIT_SECRET,
+  ownerPassword = process.env.OWNER_PASSWORD,
 } = {}) {
   const listenPort = Number(port);
   if (!/^\d+$/.test(String(port)) || !Number.isInteger(listenPort) || listenPort > 65535) {
@@ -64,7 +65,9 @@ export async function startBookingServer({
   }
 
   const DB = openBookingDatabase(databaseFile);
-  const env = { DB, RATE_LIMIT_SECRET: rateLimitSecret };
+  const env = { DB, RATE_LIMIT_SECRET: rateLimitSecret, OWNER_PASSWORD: ownerPassword };
+  for (const key of ['SMS_ENABLED', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_SENDER_ID',
+    'SMS_TURKEY_LOCAL_ENTITY', 'APP_ORIGIN', 'JOB_SECRET']) env[key] = process.env[key];
   const server = createServer({ headersTimeout: 10_000, requestTimeout: 15_000 }, async (incoming, outgoing) => {
     try {
       if (['CONNECT', 'TRACE', 'TRACK'].includes(incoming.method)) {

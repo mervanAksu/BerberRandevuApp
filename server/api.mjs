@@ -1,3 +1,6 @@
+import { reminderJob } from './jobs.mjs';
+import { handleOwner } from './owner.mjs';
+import { handleCancel, makeCancelPath } from './cancel.mjs';
 import { ApiError, availableSlots, catalog, createBooking } from './booking.mjs';
 
 const maxBodyBytes = 2048;
@@ -5,7 +8,7 @@ const rateWindowMs = 10 * 60 * 1000;
 const bookingAttempts = 12;
 const encode = new TextEncoder();
 
-function json(value, status = 200, headers = {}) {
+export function json(value, status = 200, headers = {}) {
   return Response.json(value, {
     status,
     headers: {
@@ -16,13 +19,13 @@ function json(value, status = 200, headers = {}) {
   });
 }
 
-function requireMethod(request, method) {
+export function requireMethod(request, method) {
   if (request.method !== method) {
     throw new ApiError(405, 'METHOD_NOT_ALLOWED', 'Bu işlem desteklenmiyor.', { Allow: method });
   }
 }
 
-function checkBookingHeaders(request, url) {
+export function checkBookingHeaders(request, url) {
   const origin = request.headers.get('origin');
   if ((origin !== null && origin !== url.origin) || request.headers.get('sec-fetch-site') === 'cross-site') {
     throw new ApiError(403, 'INVALID_ORIGIN', 'Bu kaynaktan randevu gönderilemez.');
@@ -39,7 +42,7 @@ function checkBookingHeaders(request, url) {
   }
 }
 
-async function bookingBody(request) {
+export async function bookingBody(request) {
   if (!request.body) throw new ApiError(400, 'INVALID_JSON', 'Randevu bilgileri okunamadı.');
 
   const bytes = new Uint8Array(maxBodyBytes);
@@ -96,7 +99,7 @@ function toHex(bytes) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function rateLimit(request, env, now) {
+export async function rateLimit(request, env, now) {
   // The Worker receives this header from Cloudflare. The local adapter replaces it with the socket address.
   const incoming = request.headers.get('cf-connecting-ip')?.trim().toLowerCase() ?? '';
   const address = /^[0-9a-f:.]{1,64}$/.test(incoming) ? incoming : 'unknown';
@@ -133,10 +136,14 @@ export function createApiHandler(clock = () => new Date()) {
   return async function handleRequest(request, env) {
     try {
       const url = new URL(request.url);
+      if (url.pathname.startsWith('/api/owner/')) return await handleOwner(request, env, clock());
+      if (url.pathname.startsWith('/api/cancel/')) return await handleCancel(request, env, clock());
       switch (url.pathname) {
+        case '/api/jobs/reminders':
+          return await reminderJob(request, env);
         case '/api/catalog':
           requireMethod(request, 'GET');
-          return json(catalog(clock()));
+          return json({ ...catalog(clock()), smsAvailable: env.SMS_ENABLED === 'true' && Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_SENDER_ID) });
         case '/api/slots': {
           requireMethod(request, 'GET');
           const { searchParams } = url;
@@ -153,7 +160,8 @@ export function createApiHandler(clock = () => new Date()) {
           const input = await bookingBody(request);
           await rateLimit(request, env, clock());
           const result = await createBooking(env.DB, input, clock());
-          return json(result.confirmation, result.created ? 201 : 200);
+          const cancelPath = await makeCancelPath(env.DB, result.confirmation.reference);
+          return json({ ...result.confirmation, cancelPath }, result.created ? 201 : 200);
         }
         default:
           throw new ApiError(404, 'NOT_FOUND', 'Bu sayfa bulunamadı.');

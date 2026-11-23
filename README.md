@@ -31,7 +31,7 @@ npm run bookings -- cancel MKS-ABCDEF012345
 ## Randevu kuralları
 
 - Saatler `Europe/Istanbul` saat dilimindedir. Bugünden 30 gün sonrasına kadar, son gün dahil, randevu alınabilir. Saatler 15 dakikalık adımlarla sunulur. Seçilen hizmetlerin toplam süresi berberin molalarına ve mevcut randevularına denk gelmeden vardiyaya sığmalıdır.
-- Türkiye telefon numaraları `+90` biçiminde saklanır. Numara biçimi kontrol edilir. Telefon sahipliği doğrulaması ve SMS gönderimi sürümde yer almıyor.
+- Türkiye telefon numaraları `+90` biçiminde saklanır. Numara biçimi kontrol edilir. İsteğe bağlı SMS hatırlatmaları için sağlayıcı ve zamanlayıcı kurulur. Telefon sahipliği doğrulanmaz.
 - Müşteri adı ve telefonu randevu kaydında tutulur. Müsaitlik ve onay yanıtları bu bilgileri içermez. İptal işlemi kaydı ve iletişim bilgilerini veritabanında bırakır.
 
 ## Salon kurulumu
@@ -40,6 +40,14 @@ Demoyu denerken örnek müşteri bilgileri kullanın. Gerçek müşteri kaydına
 
 Müşteri kaydı açmadan önce HTTPS'yi doğrulayın, veritabanı ve yedek erişimlerini sınırlandırın. Müşteriye gösterilecek aydınlatma metnini ve kayıtların saklama ve silme sürecini işletmeyle belirleyin. Gerçek müşteri verisini ve gizli anahtarları repoya eklemeyin.
 
-Sonraki sürüm için iki öncelik, yetkili salon yönetim ekranında randevu görüntüleme ve iptal ile müşteriye randevu hatırlatmasıdır.
+## Telefonda işletme paneli
+
+`/isletme` adresini açıp tarayıcı menüsünden ana ekrana ekleyebilirsiniz. Günü ve berberi seçerek ajandayı görüntüleyin, gelen müşteriyi kaydedin, mola veya izin aralığı ayırın ve randevu iptal edin. Tüm işlemler müşteri takvimiyle aynı veritabanını kullanır.
+
+Özel ChatGPT Sites demosunda site sahibinin platform tarafından doğrulanan kimliği, sunucudaki gizli `OWNER_EMAIL` ayarıyla eşleştirilir. Diğer ziyaretçilere panel yetkisi verilmez. Yerel veya bağımsız sunucuda en az 16 karakterlik gizli `OWNER_PASSWORD` ortam değişkenini tanımlayıp sunucuyu başlatın. Parola ile girişte oturum 12 saat sürer. Bağımsız sunucularda platform kimlik başlıklarına güvenilmez.
+
+## Müşteri iptali ve hatırlatmalar
+
+Onay fişindeki kişisel bağlantı randevuyu görüntüler. Müşteri randevu başlamadan önce iptalini onayladığında saat yeniden açılır. Bağlantıyı alan kişi iptal edebileceği için bağlantıyı özel tutun. SMS gönderimi isteğe bağlıdır. [Sağlayıcı ve zamanlayıcı kurulumu](docs/sms.md).
 
 [Tasarım notları](docs/design.md) · [Güvenlik ve müşteri verisi](docs/security.md) · [Repo çalışma kuralları](AGENTS.md)

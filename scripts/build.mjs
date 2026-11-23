@@ -33,10 +33,11 @@ try {
   await Promise.all([mkdir(server), mkdir(metadata)]);
 
   const source = await readFile(join(root, 'worker.mjs'), 'utf8');
-  const output = `${source}
+  const output = `import { processReminders } from './server/reminders.mjs';
+${source}
 const embeddedAssets = new Map(${JSON.stringify(assets)});
 
-export default { fetch: createBookingApp(pathname => {
+const serve = createBookingApp(pathname => {
   const encoded = embeddedAssets.get(pathname);
   if (encoded === undefined) return null;
   if (Uint8Array.fromBase64) return Uint8Array.fromBase64(encoded);
@@ -44,7 +45,17 @@ export default { fetch: createBookingApp(pathname => {
   const bytes = new Uint8Array(decoded.length);
   for (let index = 0; index < decoded.length; index++) bytes[index] = decoded.charCodeAt(index);
   return bytes;
-}) };
+});
+export default {
+  fetch(request, env) {
+    const email = request.headers.get('oai-authenticated-user-email')?.trim().toLowerCase();
+    const hosted = new URL(request.url).hostname.endsWith('.chatgpt.site');
+    const verified = Boolean(hosted && env.OWNER_EMAIL && email === env.OWNER_EMAIL.trim().toLowerCase()
+      && request.headers.get('oai-authenticated-user-id'));
+    return serve(request, { ...env, OWNER_VERIFIED_BY_PLATFORM: verified });
+  },
+  async scheduled(controller, env) { await processReminders(env); }
+};
 `;
 
   const hosting = readFile(join(root, '.openai', 'hosting.json')).catch(error => {

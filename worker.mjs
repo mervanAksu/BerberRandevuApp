@@ -13,6 +13,7 @@ const mediaTypes = {
   '.svg': 'image/svg+xml',
   '.ttf': 'font/ttf',
   '.txt': 'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
   '.webp': 'image/webp',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
@@ -42,7 +43,8 @@ export function createBookingApp(readAsset) {
       });
     }
 
-    const assetPath = pathname === '/' ? '/index.html' : pathname;
+    const pages = { '/': '/index.html', '/isletme': '/isletme.html', '/isletme/': '/isletme.html' };
+    const assetPath = Object.hasOwn(pages, pathname) ? pages[pathname] : pathname;
     const contentType = mediaType(assetPath);
     const bytes = contentType ? await readAsset(assetPath) : null;
     if (!bytes) {

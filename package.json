@@ -11,6 +11,7 @@
     "start": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --test",
-    "bookings": "node scripts/bookings.mjs"
+    "bookings": "node scripts/bookings.mjs",
+    "reminders": "node scripts/remind.mjs"
   }
 }
