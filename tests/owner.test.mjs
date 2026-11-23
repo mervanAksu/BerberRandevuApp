@@ -48,7 +48,14 @@ test('owner requires credentials or verified platform identity, revokes and expi
   assert.equal((await app.owner('agenda')).status, 401);
   app.env.OWNER_PASSWORD = '';
   assert.equal((await app.owner('agenda')).status, 503);
-  app.env.OWNER_VERIFIED_BY_PLATFORM = true;
+  for (const [state, status, code] of [['missing', 401, 'OWNER_SIGN_IN'], ['other', 403, 'OWNER_FORBIDDEN']]) {
+    app.env.OWNER_HOSTED_IDENTITY = state;
+    const response = await app.owner('agenda');
+    assert.equal(response.status, status);
+    assert.equal((await response.json()).code, code);
+    assert.equal((await app.owner('cancel', { reference: 'test' })).status, status);
+  }
+  app.env.OWNER_HOSTED_IDENTITY = 'owner';
   assert.equal((await (await app.owner('agenda')).json()).authMode, 'platform');
   assert.equal((await app.owner('blocks', {}, { origin: 'https://other.example' })).status, 403);
 });

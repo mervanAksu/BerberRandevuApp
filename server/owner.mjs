@@ -69,8 +69,11 @@ async function block(db, input, now) {
 
 export async function handleOwner(request, env, now = new Date()) {
   const password = env.OWNER_PASSWORD;
-  const platform = env.OWNER_VERIFIED_BY_PLATFORM === true;
+  const identity = env.OWNER_HOSTED_IDENTITY;
+  const platform = identity === 'owner';
   if (!platform && (typeof password !== 'string' || password.trim().length < 16)) {
+    if (identity === 'missing') throw new ApiError(401, 'OWNER_SIGN_IN', 'Salon ajandasını açmak için işletme sahibi hesabınızla giriş yapın.');
+    if (identity === 'other') throw new ApiError(403, 'OWNER_FORBIDDEN', 'Bu hesap işletme paneline yetkili değil. İşletme sahibi hesabınızı kullanın.');
     throw new ApiError(503, 'OWNER_UNCONFIGURED', 'İşletme girişi henüz yapılandırılmadı.');
   }
   const url = new URL(request.url);

@@ -44,7 +44,7 @@ Müşteri kaydı açmadan önce HTTPS'yi doğrulayın, veritabanı ve yedek eri�
 
 `/isletme` adresini açıp tarayıcı menüsünden ana ekrana ekleyebilirsiniz. Günü ve berberi seçerek ajandayı görüntüleyin, gelen müşteriyi kaydedin, mola veya izin aralığı ayırın ve randevu iptal edin. Tüm işlemler müşteri takvimiyle aynı veritabanını kullanır.
 
-Özel ChatGPT Sites demosunda site sahibinin platform tarafından doğrulanan kimliği, sunucudaki gizli `OWNER_EMAIL` ayarıyla eşleştirilir. Diğer ziyaretçilere panel yetkisi verilmez. Yerel veya bağımsız sunucuda en az 16 karakterlik gizli `OWNER_PASSWORD` ortam değişkenini tanımlayıp sunucuyu başlatın. Parola ile girişte oturum 12 saat sürer. Bağımsız sunucularda platform kimlik başlıklarına güvenilmez.
+Özel ChatGPT Sites demosunda site sahibinin platform tarafından doğrulanan kimliği, sunucudaki gizli `OWNER_EMAIL` ayarıyla eşleştirilir. Oturum açılmamışsa paneldeki “ChatGPT ile giriş yap” bağlantısını kullanın. Oturum açıldıktan sonra aynı panele dönülür. Farklı bir hesapla giriş yapan ziyaretçinin ajandaya erişimi reddedilir. `SITES_MANAGED_IDENTITY=enabled` ayarını yalnızca kimlik başlıklarını doğrulayan Sites dağıtımında kullanın. Yerel veya bağımsız sunucuda en az 16 karakterlik gizli `OWNER_PASSWORD` ortam değişkenini tanımlayıp sunucuyu başlatın. Parola ile girişte oturum 12 saat sürer. Bağımsız sunucularda platform kimlik başlıklarına güvenilmez.
 
 ## Müşteri iptali ve hatırlatmalar
 

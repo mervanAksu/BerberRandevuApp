@@ -33,7 +33,8 @@ try {
   await Promise.all([mkdir(server), mkdir(metadata)]);
 
   const source = await readFile(join(root, 'worker.mjs'), 'utf8');
-  const output = `import { processReminders } from './server/reminders.mjs';
+  const output = `import { sitesIdentity } from './server/sites-identity.mjs';
+import { processReminders } from './server/reminders.mjs';
 ${source}
 const embeddedAssets = new Map(${JSON.stringify(assets)});
 
@@ -48,11 +49,7 @@ const serve = createBookingApp(pathname => {
 });
 export default {
   fetch(request, env) {
-    const email = request.headers.get('oai-authenticated-user-email')?.trim().toLowerCase();
-    const hosted = new URL(request.url).hostname.endsWith('.chatgpt.site');
-    const verified = Boolean(hosted && env.OWNER_EMAIL && email === env.OWNER_EMAIL.trim().toLowerCase()
-      && request.headers.get('oai-authenticated-user-id'));
-    return serve(request, { ...env, OWNER_VERIFIED_BY_PLATFORM: verified });
+    return serve(request, { ...env, ...sitesIdentity(request, env) });
   },
   async scheduled(controller, env) { await processReminders(env); }
 };

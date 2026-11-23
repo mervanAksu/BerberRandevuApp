@@ -12,7 +12,7 @@ function shiftDate(value, offset) { const d = new Date(value + 'T12:00:00Z'); d.
 async function request(path, payload) {
   const response = await fetch(path, {cache:'no-store', ...(payload ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)} : {})});
   let body; try { body = await response.json(); } catch { throw new Error('Sunucudan yanıt alınamadı. Tekrar deneyin.'); }
-  if (!response.ok) { const error = new Error(body.error || 'İşlem tamamlanamadı. Tekrar deneyin.'); error.status = response.status; throw error; }
+  if (!response.ok) { const error = new Error(body.error || 'İşlem tamamlanamadı. Tekrar deneyin.'); error.status = response.status; error.code = body.code; throw error; }
   return body;
 }
 function notify(message) { const toast = document.querySelector('#toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(notify.timer); notify.timer = setTimeout(() => toast.classList.remove('show'), 3500); }
@@ -23,10 +23,33 @@ function login(message = '') {
   if (message) showError(document.querySelector('#login-error'), message);
   document.querySelector('#login-form').addEventListener('submit', async e => { e.preventDefault(); const btn = e.submitter; btn.disabled = true; try { await request('/api/owner/login', {password:new FormData(e.target).get('password')}); loggedIn = true; await load(); } catch(error) { showError(document.querySelector('#login-error'), error.message); } finally { btn.disabled = false; } });
 }
+function showAccessPrompt(error) {
+  if (error.code === 'OWNER_SIGN_IN' || error.code === 'OWNER_FORBIDDEN') {
+    loadSequence++;
+    loggedIn = false;
+    agenda = null;
+    logout.hidden = true;
+    if (modal.open) modal.close();
+    const wrongAccount = error.code === 'OWNER_FORBIDDEN';
+    const href = wrongAccount
+      ? '/signout-with-chatgpt?return_to=%2Fisletme'
+      : '/signin-with-chatgpt?return_to=%2Fisletme';
+    app.innerHTML = `<section class="login"><p class="eyebrow">İŞLETME PANELİ</p>
+      <h1>İşletme <em>girişi.</em></h1><p class="sub">${esc(error.message)}</p>
+      <a class="primary owner-signin" href="${href}" target="_top">${wrongAccount ? 'Hesabı değiştir' : 'ChatGPT ile giriş yap'}</a></section>`;
+    return true;
+  }
+  if (error.status === 401) {
+    if (modal.open) modal.close();
+    login();
+    return true;
+  }
+  return false;
+}
 async function load() {
   const sequence = ++loadSequence;
   try { if (!catalog) catalog = await request('/api/catalog'); if (sequence !== loadSequence) return; if (!date) date = catalog.today; const requestedDate = date; const result = await request('/api/owner/agenda?date=' + encodeURIComponent(requestedDate)); if (sequence !== loadSequence) return; agenda = result; date = requestedDate; loggedIn = true; logout.hidden = agenda.authMode === 'platform'; render(); }
-  catch(error) { if (sequence !== loadSequence) return; if (error.status === 401) login(); else if (!loggedIn) { app.innerHTML = `<div class="login"><h1>Panele ulaşılamadı.</h1><p class="sub">${esc(error.message)}</p><button class="primary" id="retry">Tekrar dene</button></div>`; document.querySelector('#retry').onclick = load; } else { date = agenda.date; render(); notify(error.message + ' Tekrar deneyin.'); } }
+  catch(error) { if (sequence !== loadSequence) return; if (showAccessPrompt(error)) return; if (!loggedIn) { app.innerHTML = `<div class="login"><h1>Panele ulaşılamadı.</h1><p class="sub">${esc(error.message)}</p><button class="primary" id="retry">Tekrar dene</button></div>`; document.querySelector('#retry').onclick = load; } else { date = agenda.date; render(); notify(error.message + ' Tekrar deneyin.'); } }
 }
 function render() {
   const bookings = agenda.bookings.filter(b => !filter || b.barberId === filter);
@@ -49,7 +72,7 @@ function entryHtml(item) {
 }
 function openModal(title, intro, content) { modalContent.innerHTML = `<div class="modal-inner"><div class="modal-top"><h2 id="modal-title">${title}</h2><button class="close" type="button" aria-label="Kapat">×</button></div><p class="modal-intro">${intro}</p>${content}</div>`; modalContent.querySelector('.close').onclick = () => modal.close(); modal.showModal(); }
 const barberOptions = () => catalog.barbers.map(b => `<option value="${esc(b.id)}" ${filter===b.id?'selected':''}>${esc(b.name)}</option>`).join('');
-function wireForm(handler) { const form=modal.querySelector('form'); let busy = false; form.addEventListener('submit', async e => { e.preventDefault(); if (busy) return; busy = true; const btn=e.submitter || form.querySelector('[type=submit]'); btn.disabled=true; try {await handler(new FormData(form)); modal.close(); await load(); notify('İşlem tamamlandı.');} catch(error) {if(error.status===401){modal.close();login('Oturumunuz sona erdi. Tekrar giriş yapın.');} else showError(modal.querySelector('.form-error'),error.message);} finally {busy=false; btn.disabled=false;} }); }
+function wireForm(handler) { const form=modal.querySelector('form'); let busy = false; form.addEventListener('submit', async e => { e.preventDefault(); if (busy) return; busy = true; const btn=e.submitter || form.querySelector('[type=submit]'); btn.disabled=true; try {await handler(new FormData(form)); modal.close(); await load(); notify('İşlem tamamlandı.');} catch(error) {if(!showAccessPrompt(error)) showError(modal.querySelector('.form-error'),error.message);} finally {busy=false; btn.disabled=false;} }); }
 function walkinDialog() {
   const parts = new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Istanbul', hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).formatToParts(new Date());
   const hour = Number(parts.find(p => p.type === 'hour').value), minute = Number(parts.find(p => p.type === 'minute').value);
