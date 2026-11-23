@@ -21,6 +21,7 @@ let loadError = '';
 let formError = '';
 let formErrorField = '';
 let conflictNotice = '';
+let quoteNotice = '';
 let submitting = false;
 let result;
 const initial = () => ({ step: 0, serviceIds: [], barberId: '', date: '', time: '', name: '', phone: '', requestId: '' });
@@ -183,6 +184,7 @@ function conflictingService(id) {
 }
 
 function servicesStep(panel) {
+  if (quoteNotice) panel.append(alertBox(quoteNotice));
   const group = element('div', 'option-list');
   for (const service of catalog.services) {
     const selected = draft.serviceIds.includes(service.id);
@@ -247,6 +249,7 @@ function resetSchedule() {
 function pageButton(label, previous, disabled) {
   const el = button('', 'icon-button' + (previous ? ' previous' : ''), () => {
     dateOffset += previous ? -7 : 7;
+    draft.date = draft.time = draft.requestId = '';
     loadDates();
   }, previous ? 'prev-week' : 'next-week');
   el.setAttribute('aria-label', label);
@@ -394,19 +397,21 @@ function confirmation() {
   const rows = element('dl');
   rows.append(readOnlyRow('Randevu kodu', result.reference), readOnlyRow('Hizmet', serviceNames()),
     readOnlyRow('Berber', barber().name), readOnlyRow('Tarih ve saat', dateLabel(result.date) + ' · ' + result.time),
-    readOnlyRow('Süre', duration() + ' dakika'), readOnlyRow('Toplam', currency.format(price())));
+    readOnlyRow('Süre', result.duration + ' dakika'), readOnlyRow('Toplam', currency.format(result.price)));
   panel.append(badge, heading, element('p', 'subtle', 'Deneme randevunun kodunu ve ayrıntılarını aşağıda bulabilirsin.'), rows,
     button('Yeni randevu oluştur', 'secondary', () => {
       draft = initial();
       result = null;
       dateOffset = 0;
       conflictNotice = '';
+      quoteNotice = '';
       loadCatalog(true);
     }));
   return panel;
 }
 
 function render(focusHeading = false) {
+  const headingWasFocused = app.contains(document.activeElement) && document.activeElement.id === 'step-heading';
   const oldKey = app.contains(document.activeElement) ? document.activeElement.dataset.focus : '';
   const currentReceipt = app.querySelector('details');
   if (currentReceipt) receiptOpen = currentReceipt.open;
@@ -434,10 +439,10 @@ function render(focusHeading = false) {
     workspace.append(left, receipt());
     app.replaceChildren(workspace);
   }
-  if (focusHeading) {
+  if (focusHeading || headingWasFocused) {
     const heading = document.getElementById('step-heading');
     heading.focus({ preventScroll: true });
-    if (heading.getBoundingClientRect().top < 0 || heading.getBoundingClientRect().top > window.innerHeight * .78) {
+    if (focusHeading && (heading.getBoundingClientRect().top < 0 || heading.getBoundingClientRect().top > window.innerHeight * .78)) {
       document.getElementById('randevu').scrollIntoView({ block: 'start' });
     }
   } else if (oldKey) {
@@ -512,7 +517,8 @@ async function save() {
   if (submitting) return;
   const { serviceIds, barberId, date, time, name, phone } = draft;
   if (!draft.requestId) draft.requestId = crypto.randomUUID();
-  const payload = { serviceIds, barberId, date, time, name, phone, requestId: draft.requestId };
+  const payload = { serviceIds, barberId, date, time, name, phone, requestId: draft.requestId,
+    quotedPrice: price(), quotedDuration: duration() };
   formError = '';
   formErrorField = '';
   submitting = true;
@@ -524,7 +530,14 @@ async function save() {
     render(true);
   } catch (error) {
     submitting = false;
-    if (['SLOT_TAKEN', 'SLOT_UNAVAILABLE', 'BOOKING_CANCELLED'].includes(error.code)) {
+    if (error.code === 'QUOTE_CHANGED') {
+      draft.serviceIds = [];
+      draft.barberId = '';
+      draft.step = 0;
+      resetSchedule();
+      quoteNotice = 'Hizmetlerin fiyatı veya süresi değişti. Güncel bilgileri inceleyip seçimini yeniden yap.';
+      loadCatalog(true);
+    } else if (['SLOT_TAKEN', 'SLOT_UNAVAILABLE', 'BOOKING_CANCELLED'].includes(error.code)) {
       draft.time = draft.requestId = '';
       draft.step = 3;
       conflictNotice = error.message;

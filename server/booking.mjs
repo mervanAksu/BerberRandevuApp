@@ -165,9 +165,11 @@ function bookingInput(input) {
   };
 }
 
-function confirmation(reference, booking) {
+function confirmation({ reference, price, duration }, booking) {
   return {
     reference,
+    price,
+    duration,
     serviceIds: booking.serviceIds,
     ...(booking.serviceIds.length === 1 ? { serviceId: booking.serviceIds[0] } : {}),
     barberId: booking.barberId,
@@ -178,7 +180,8 @@ function confirmation(reference, booking) {
 
 async function previousBooking(db, booking) {
   const existing = await db.prepare(`
-    SELECT reference, service_id, service_ids, barber_id, booking_date, start_minute,
+    SELECT reference, price, end_minute - start_minute AS duration,
+           service_id, service_ids, barber_id, booking_date, start_minute,
            customer_name, customer_phone, cancelled_at
     FROM bookings
     WHERE request_id = ?
@@ -194,13 +197,19 @@ async function previousBooking(db, booking) {
   if (existing.cancelled_at !== null) {
     throw new ApiError(409, 'BOOKING_CANCELLED', 'Bu randevu iptal edildi. Yeni bir saat seç.');
   }
-  return confirmation(existing.reference, booking);
+  return confirmation(existing, booking);
 }
 
 export async function createBooking(db, input, now) {
   const booking = bookingInput(input);
   const existing = await previousBooking(db, booking);
   if (existing) return { confirmation: existing, created: false };
+
+  const { quotedPrice, quotedDuration } = input;
+  if ((quotedPrice !== undefined && quotedPrice !== booking.price) ||
+      (quotedDuration !== undefined && quotedDuration !== booking.duration)) {
+    throw new ApiError(409, 'QUOTE_CHANGED', 'Hizmet fiyatı veya süresi değişti. Güncel bilgileri kontrol edip tekrar dene.');
+  }
 
   const window = bookingWindow(now);
   checkDateRange(booking.date, window);
@@ -220,7 +229,7 @@ export async function createBooking(db, input, now) {
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM bookings WHERE request_id = ?)
-      RETURNING reference
+      RETURNING reference, price, end_minute - start_minute AS duration
     `).bind(
       reference, booking.requestId, booking.serviceIds[0], serviceList, booking.barberId, booking.date,
       booking.start, booking.end, booking.price, booking.name, booking.phone,
@@ -233,7 +242,7 @@ export async function createBooking(db, input, now) {
     throw error;
   }
 
-  if (inserted) return { confirmation: confirmation(inserted.reference, booking), created: true };
+  if (inserted) return { confirmation: confirmation(inserted, booking), created: true };
 
   const retried = await previousBooking(db, booking);
   if (!retried) throw new Error('Booking disappeared during retry');
