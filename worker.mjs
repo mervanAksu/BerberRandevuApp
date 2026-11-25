@@ -1,89 +1,69 @@
-import { readProfile } from './server/profile.mjs';
-import { handleApi } from './server/api.mjs';
+import { bootstrapDemo, createAppointment, DomainError, listSalons,
+  salonDashboard, updateAppointmentStatus } from './server/domain.mjs';
 
-const mediaTypes = {
-  '.css': 'text/css; charset=utf-8',
-  '.html': 'text/html; charset=utf-8',
-  '.ico': 'image/x-icon',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.ttf': 'font/ttf',
-  '.txt': 'text/plain; charset=utf-8',
-  '.webmanifest': 'application/manifest+json',
-  '.webp': 'image/webp',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-};
-
-const securityHeaders = {
-  'Content-Security-Policy': "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:",
-  'Referrer-Policy': 'same-origin',
+const page = '__INJECT_HTML__';
+const script = '__INJECT_SCRIPT__';
+const security = {
+  'Cache-Control': 'no-store',
+  'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
   'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
 };
+const reply = (body, status = 200) => Response.json(body, { status, headers: security });
 
-export function mediaType(pathname) {
-  if (!/^\/(?:[a-z\d_-]+\/)*[a-z\d][a-z\d._-]*\.[a-z\d]+$/i.test(pathname)) return null;
-  return mediaTypes[pathname.slice(pathname.lastIndexOf('.')).toLowerCase()] ?? null;
+async function jsonBody(request) {
+  const origin = request.headers.get('Origin');
+  const expected = new URL(request.url).origin;
+  if (origin !== expected) throw new DomainError(403, 'ORIGIN', 'Bu kaynaktan işlem yapılamaz.');
+  if (!request.headers.get('content-type')?.startsWith('application/json')) {
+    throw new DomainError(415, 'TYPE', 'JSON gönderin.');
+  }
+  if (Number(request.headers.get('content-length') || 0) > 2048) {
+    throw new DomainError(413, 'BODY_TOO_LARGE', 'İstek çok büyük.');
+  }
+  const raw = await request.text();
+  if (raw.length > 2048) throw new DomainError(413, 'BODY_TOO_LARGE', 'İstek çok büyük.');
+  try {
+    const body = JSON.parse(raw);
+    if (!body || Array.isArray(body) || typeof body !== 'object') throw Error();
+    return body;
+  } catch { throw new DomainError(400, 'INVALID_JSON', 'Geçersiz veri.'); }
 }
 
-export function createBookingApp(readAsset) {
-  return async function fetch(request, env) {
-    const { pathname } = new URL(request.url);
-    if (pathname === '/api' || pathname.startsWith('/api/')) return handleApi(request, env);
-
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      return new Response('Yöntem desteklenmiyor.', {
-        status: 405,
-        headers: { ...securityHeaders, Allow: 'GET, HEAD' },
-      });
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === '/' && request.method === 'GET') {
+      return new Response(page, { headers: { ...security, 'Content-Type': 'text/html; charset=utf-8' } });
     }
-
-    if (pathname === '/owner.webmanifest') {
-      const headers = {
-        ...securityHeaders, 'Cache-Control': 'no-cache', 'Content-Type': 'application/manifest+json',
-      };
-      try {
-        const { shop } = await readProfile(env.DB);
-        const icons = [192, 512].map(size => ({
-          src: `/owner-icon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png',
-        }));
-        if (shop.logoPath && shop.logoPath !== '/mark.svg') icons.unshift({ src: shop.logoPath });
-        const manifest = {
-          name: `${shop.name} İşletme`, short_name: shop.name, lang: 'tr',
-          start_url: '/isletme', scope: '/', display: 'standalone',
-          background_color: '#f7f5ee', theme_color: '#182d27', icons,
-        };
-        return new Response(request.method === 'HEAD' ? null : JSON.stringify(manifest), { headers });
-      } catch {
-        return new Response(null, { status: 503, headers: { ...headers, 'Cache-Control': 'no-store' } });
+    if (url.pathname === '/app.js' && request.method === 'GET') {
+      return new Response(script, { headers: { ...security, 'Content-Type': 'text/javascript; charset=utf-8' } });
+    }
+    if (!url.pathname.startsWith('/api/')) return new Response('Bulunamadı', { status: 404, headers: security });
+    if (!env.DB) return reply({ error: 'Demo veritabanı hazır değil.' }, 503);
+    try {
+      if (url.pathname === '/api/salons' && request.method === 'GET') {
+        return reply({ salons: await listSalons(env.DB) });
       }
+      if (url.pathname === '/api/bootstrap' && request.method === 'POST') {
+        await jsonBody(request);
+        return reply(await bootstrapDemo(env.DB));
+      }
+      const match = /^\/api\/salons\/([a-z][a-z0-9-]{1,40})(?:\/(appointments|status))?$/.exec(url.pathname);
+      if (!match) return reply({ error: 'API bulunamadı.' }, 404);
+      const [, id, action] = match;
+      if (!action && request.method === 'GET') return reply(await salonDashboard(env.DB, id));
+      if (action === 'appointments' && request.method === 'POST') {
+        return reply(await createAppointment(env.DB, id, await jsonBody(request)), 201);
+      }
+      if (action === 'status' && request.method === 'POST') {
+        const { appointmentId, status, expectedStatus } = await jsonBody(request);
+        return reply(await updateAppointmentStatus(env.DB, id, appointmentId, status, expectedStatus));
+      }
+      return reply({ error: 'Yöntem desteklenmiyor.' }, 405);
+    } catch (error) {
+      if (error instanceof DomainError) return reply({ error: error.message, code: error.code }, error.status);
+      return reply({ error: 'İşlem tamamlanamadı.' }, 503);
     }
-
-    const pages = { '/': '/index.html', '/isletme': '/isletme.html', '/isletme/': '/isletme.html' };
-    const assetPath = Object.hasOwn(pages, pathname) ? pages[pathname] : pathname;
-    const contentType = mediaType(assetPath);
-    const bytes = contentType ? await readAsset(assetPath) : null;
-    if (!bytes) {
-      return new Response(request.method === 'HEAD' ? null : 'Sayfa bulunamadı.', {
-        status: 404,
-        headers: securityHeaders,
-      });
-    }
-
-    const cacheable = contentType.startsWith('image/') || contentType.startsWith('font/');
-    return new Response(request.method === 'HEAD' ? null : bytes, {
-      headers: {
-        ...securityHeaders,
-        'Content-Type': contentType,
-        'Content-Length': String(bytes.byteLength),
-        'Cache-Control': cacheable ? 'public, max-age=3600' : 'no-cache',
-      },
-    });
-  };
-}
+  },
+};

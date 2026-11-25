@@ -1,17 +1,9 @@
 {
-  "name": "berber-randevu-app",
-  "version": "1.0.0",
+  "name": "makas-saas-demo",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24.0.0"
-  },
   "scripts": {
-    "dev": "node scripts/serve.mjs",
-    "start": "node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "test": "node --test",
-    "bookings": "node scripts/bookings.mjs",
-    "reminders": "node scripts/remind.mjs"
+    "test": "node --test"
   }
 }

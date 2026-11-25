@@ -1,625 +1,192 @@
-import { applySalonBrand } from './branding.js';
+const $ = selector => document.querySelector(selector);
+const select = $('#salon');
+const content = $('#content');
+const modal = $('#editor');
+const form = $('#editor-form');
+const labels = { confirmed: 'Bekliyor', arrived: 'Geldi', completed: 'Tamamlandı', no_show: 'Gelmedi', cancelled: 'İptal edildi' };
+const transitions = { confirmed: ['arrived', 'completed', 'no_show', 'cancelled'], arrived: ['completed', 'cancelled'] };
+const dayFormat = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const lira = new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 });
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => new Date().toLocaleDateString('sv-SE', {timeZone:'Europe/Istanbul'});
+const asDate = day => new Date(day + 'T12:00:00Z');
+const time = minute => [Math.floor(minute / 60), minute % 60].map(n => String(n).padStart(2, '0')).join(':');
+const option = (id, name) => '<option value="' + esc(id) + '">' + esc(name) + '</option>';
+let day = today();
+let dashboard;
+let sequence = 0;
+let editor;
+let busy = false;
 
-const app = document.getElementById('booking-app');
-const announcer = document.getElementById('announcer');
-const titles = ['Hizmet', 'Berber', 'Tarih', 'Saat', 'Bilgiler'];
-const headings = ['Hizmet seçimi', 'Berber seçimi', 'Tarih seçimi', 'Saat seçimi', 'Kişisel bilgiler'];
-const serviceIcons = {
-  'sac-kesimi': 'cut', 'sakal-tirasi': 'beard', 'sac-sakal': 'combo',
-  'sac-boyama': 'color', 'yuz-bakimi': 'wax',
-};
-const currency = new Intl.NumberFormat('tr-TR', {
-  style: 'currency', currency: 'TRY', maximumFractionDigits: 0,
-});
-const receiptMedia = window.matchMedia('(min-width: 761px)');
-let catalog;
-let receiptOpen = receiptMedia.matches;
-let slotRequest;
-let dateChecks = new Map();
-let dateOffset = 0;
-let timeOptions = [];
-let checking = false;
-let loadError = '';
-let formError = '';
-let formErrorField = '';
-let conflictNotice = '';
-let quoteNotice = '';
-let submitting = false;
-let result;
-const initial = () => ({ step: 0, serviceIds: [], barberId: '', date: '', time: '', name: '', phone: '', smsConsent: false, requestId: '' });
-let draft = initial();
-
-function element(tag, className, value) {
-  const el = document.createElement(tag);
-  if (className) el.className = className;
-  if (value !== undefined) el.textContent = value;
-  return el;
-}
-
-function icon(name) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('class', 'icon');
-  svg.setAttribute('aria-hidden', 'true');
-  const use = document.createElementNS(ns, 'use');
-  use.setAttribute('href', '/icons.svg#' + name);
-  svg.append(use);
-  return svg;
-}
-
-function button(label, className, action, key) {
-  const el = element('button', className, label);
-  el.type = 'button';
-  if (key) el.dataset.focus = key;
-  el.addEventListener('click', action);
-  return el;
-}
-
-function alertBox(message, retry, retryLabel = 'Tekrar dene') {
-  const node = element('div', 'alert');
-  node.setAttribute('role', 'alert');
-  node.append(element('p', '', message));
-  if (retry) node.append(button(retryLabel, '', retry));
-  return node;
-}
-
-async function request(path, options = {}) {
-  const response = await fetch(path, { cache: 'no-store', ...options });
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    throw new Error('Sunucudan yanıt alınamadı. Tekrar dene.');
-  }
+async function api(path, data) {
+  const options = {cache:'no-store'};
+  if (data !== undefined) Object.assign(options, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data),
+  });
+  const response = await fetch(path, options);
+  const body = await response.json();
   if (!response.ok) {
-    const error = new Error(body.error || 'İşlem tamamlanamadı. Tekrar dene.');
+    const error = new Error(body.error || 'İşlem başarısız.');
     error.code = body.code;
     throw error;
   }
   return body;
 }
-
-const services = () => catalog.services.filter(s => draft.serviceIds.includes(s.id));
-const qualified = ids => catalog.barbers.filter(b => ids.every(id => b.serviceIds.includes(id)));
-const barber = () => catalog.barbers.find(b => b.id === draft.barberId);
-const price = () => services().reduce((sum, s) => sum + s.price, 0);
-const duration = () => services().reduce((sum, s) => sum + s.duration, 0);
-const serviceNames = () => services().map(s => s.name).join(', ');
-const dayDate = day => new Date(day + 'T12:00:00Z');
-function dateLabel(day, options = { weekday: 'short', day: 'numeric', month: 'short' }) {
-  return day ? dayDate(day).toLocaleDateString('tr-TR', { ...options, timeZone: 'UTC' }) : '';
+const pathFor = salonId => '/api/salons/' + encodeURIComponent(salonId);
+function showLoadError(error, retry) {
+  content.innerHTML = '<p class="error" role="alert">' + esc(error.message) + '</p><button>Tekrar dene</button>';
+  content.querySelector('button').onclick = retry;
 }
-function offsetDay(start, days) {
-  const d = dayDate(start);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-function week() {
-  return Array.from({ length: 7 }, (_, i) => offsetDay(catalog.today, dateOffset + i)).filter(day => day <= catalog.lastDate);
-}
-function selectionValues() {
-  return [serviceNames(), barber()?.name, dateLabel(draft.date), draft.time];
-}
-
-function stepper() {
-  const nav = element('nav');
-  nav.setAttribute('aria-label', 'Randevu adımları');
-  const list = element('ol', 'steps');
-  const values = selectionValues();
-  titles.forEach((title, i) => {
-    const done = i < draft.step;
-    const current = i === draft.step;
-    const item = element('li', !done && !current ? 'upcoming' : '');
-    const control = button('', 'step-link' + (done ? ' completed' : ''), () => go(i), 'step-' + i);
-    control.disabled = !done || submitting;
-    control.setAttribute('aria-label', (i + 1) + '. ' + headings[i] + (done ? ', ' + values[i] + ', değiştir' : ''));
-    if (current) control.setAttribute('aria-current', 'step');
-    const number = element('span', 'step-num', i + 1);
-    if (done) number.replaceChildren(icon('check'));
-    control.append(number, element('span', 'step-text', title));
-    if (done) control.append(element('span', 'step-value', values[i]), element('span', 'step-change', 'Değiştir'));
-    if (current) control.append(element('span', 'mobile-step-counter', 'Adım ' + (i + 1) + ' / 5'));
-    item.append(control);
-    list.append(item);
-  });
-  nav.append(list);
-  return nav;
-}
-
-function receipt() {
-  const node = element('details', 'receipt');
-  node.open = receiptOpen;
-  node.addEventListener('toggle', () => { if (node.isConnected) receiptOpen = node.open; });
-  const summary = element('summary');
-  summary.dataset.focus = 'summary';
-  const disclose = icon('chevron');
-  disclose.classList.add('disclose');
-  summary.append(icon('receipt'), element('h3', '', 'Randevu özeti'), disclose);
-  const list = element('dl');
-  selectionValues().forEach((value, i) => {
-    const row = element('div');
-    const dd = element('dd', value ? '' : 'empty', value || '—');
-    if (i < draft.step && value) {
-      const edit = button(value, 'receipt-edit', () => go(i), 'summary-' + i);
-      edit.disabled = submitting;
-      edit.setAttribute('aria-label', titles[i] + ' seçimini değiştir: ' + value);
-      dd.replaceChildren(edit);
-    }
-    row.append(element('dt', '', titles[i]), dd);
-    list.append(row);
-  });
-  const total = element('div', 'total');
-  total.append(element('span', '', 'Toplam'), element('strong', '', draft.serviceIds.length ? currency.format(price()) : '—'));
-  node.append(summary, list, total);
-  if (draft.serviceIds.length) node.append(element('small', '', duration() + ' dakika'));
-  return node;
-}
-
-function marker(selected) {
-  const mark = element('span', 'choice-mark');
-  mark.setAttribute('aria-hidden', 'true');
-  if (selected) mark.append(icon('check'));
-  return mark;
-}
-
-function actions(content, allowed = true, nextLabel = 'Devam et') {
-  const row = element('div', 'actions');
-  if (draft.step > 0) {
-    const back = button('Geri', 'secondary', () => go(draft.step - 1), 'back');
-    back.disabled = submitting;
-    row.append(back);
-  }
-  const next = button(nextLabel, 'primary', () => go(draft.step + 1), 'next');
-  next.disabled = !allowed;
-  row.append(next);
-  content.append(row);
-}
-
-function conflictingService(id) {
-  if (draft.serviceIds.length >= 5) return 'Bir randevuda en fazla beş hizmet seçebilirsin.';
-  const parts = ['sac-kesimi', 'sakal-tirasi'];
-  if (id === 'sac-sakal' && parts.some(part => draft.serviceIds.includes(part))) {
-    return 'Paketi seçmek için ayrı kesim veya tıraş seçimini kaldır.';
-  }
-  if (parts.includes(id) && draft.serviceIds.includes('sac-sakal')) return 'Seçtiğin pakete dahil.';
-  if (!qualified([...draft.serviceIds, id]).length) return 'Seçili hizmetlerle birlikte sunan berber yok.';
-  return '';
-}
-
-function servicesStep(panel) {
-  if (quoteNotice) panel.append(alertBox(quoteNotice));
-  const group = element('div', 'option-list');
-  if (!catalog.services.length || !catalog.barbers.length) {
-    panel.append(element('p', 'notice', 'Salon şu anda internetten randevu almıyor.'));
-    return;
-  }
-  for (const service of catalog.services) {
-    const selected = draft.serviceIds.includes(service.id);
-    const reason = selected ? '' : conflictingService(service.id);
-    const choice = button('', 'option service-option', () => {
-      const updated = selected ? draft.serviceIds.filter(id => id !== service.id) : [...draft.serviceIds, service.id];
-      draft.serviceIds = catalog.services.map(s => s.id).filter(id => updated.includes(id));
-      if (!updated.length || !qualified(updated).some(b => b.id === draft.barberId)) draft.barberId = '';
-      resetSchedule();
-      render();
-      announcer.textContent = service.name + (selected ? ' çıkarıldı.' : ' eklendi.');
-    }, service.id);
-    choice.disabled = Boolean(reason);
-    choice.setAttribute('aria-pressed', String(selected));
-    choice.title = reason || service.description;
-    const medallion = element('span', 'option-icon');
-    medallion.append(icon(serviceIcons[service.id] || 'cut'));
-    const info = element('span', 'option-info');
-    const meta = element('span', 'option-meta');
-    if (!reason) meta.append(icon('clock'));
-    meta.append(document.createTextNode(reason || service.duration + ' dk'));
-    info.append(element('span', 'option-name', service.name), meta);
-    choice.append(medallion, info, element('span', 'option-price', currency.format(service.price)), marker(selected));
-    group.append(choice);
-  }
-  panel.append(group);
-  actions(panel, Boolean(draft.serviceIds.length), 'Berber seçimine geç');
-}
-
-function barbersStep(panel) {
-  const group = element('div', 'option-list');
-  for (const person of qualified(draft.serviceIds)) {
-    const selected = person.id === draft.barberId;
-    const choice = button('', 'option', () => {
-      if (draft.barberId !== person.id) {
-        draft.barberId = person.id;
-        resetSchedule();
-      }
-      render();
-    }, 'barber-' + person.id);
-    choice.setAttribute('aria-pressed', String(selected));
-    const avatar = element('span', 'avatar', person.name.split(' ').map(p => p[0]).slice(0, 2).join(''));
-    avatar.setAttribute('aria-hidden', 'true');
-    const info = element('span', 'option-info');
-    info.append(element('span', 'option-name', person.name), element('span', 'option-meta', person.title));
-    choice.append(avatar, info, marker(selected));
-    group.append(choice);
-  }
-  panel.append(group);
-  actions(panel, Boolean(barber()), 'Tarih seçimine geç');
-}
-
-function resetSchedule() {
-  draft.date = '';
-  draft.time = '';
-  draft.requestId = '';
-  dateOffset = 0;
-  dateChecks.clear();
-  conflictNotice = '';
-}
-
-function pageButton(label, previous, disabled) {
-  const el = button('', 'icon-button' + (previous ? ' previous' : ''), () => {
-    dateOffset += previous ? -7 : 7;
-    draft.date = draft.time = draft.requestId = '';
-    loadDates();
-  }, previous ? 'prev-week' : 'next-week');
-  el.setAttribute('aria-label', label);
-  el.disabled = disabled;
-  el.append(icon('chevron'));
-  return el;
-}
-
-function datesStep(panel) {
-  const days = week();
-  const toolbar = element('div', 'date-toolbar');
-  const range = dateLabel(days[0], { day: 'numeric', month: 'short' }) + ' – ' +
-    dateLabel(days.at(-1), { day: 'numeric', month: 'short', year: 'numeric' });
-  const pages = element('div', 'date-pages');
-  pages.append(pageButton('Önceki günler', true, dateOffset === 0), pageButton('Sonraki günler', false, days.at(-1) >= catalog.lastDate));
-  toolbar.append(element('h4', '', range), pages);
-  const grid = element('div', 'date-grid');
-  for (const day of days) {
-    const known = dateChecks.has(day);
-    const full = known && dateChecks.get(day).length === 0;
-    const selected = day === draft.date;
-    const choice = button('', 'date-cell', () => {
-      if (draft.date !== day) {
-        draft.date = day;
-        draft.time = '';
-        draft.requestId = '';
-      }
-      render();
-    }, 'date-' + day);
-    choice.disabled = full || (checking && !known);
-    const fullDate = dateLabel(day, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    choice.setAttribute('aria-label', fullDate + (full ? ', müsait saat yok' : ''));
-    choice.setAttribute('aria-pressed', String(selected));
-    choice.append(element('span', 'weekday', day === catalog.today ? 'Bugün' : dateLabel(day, { weekday: 'short' })),
-      element('strong', '', dateLabel(day, { day: 'numeric' })));
-    grid.append(choice);
-  }
-  panel.append(toolbar, grid);
-  if (checking) panel.append(element('p', 'calendar-note', 'Günlerin müsaitliği kontrol ediliyor…'));
-  else if (loadError) panel.append(alertBox(loadError, loadDates));
-  else if (days.every(day => dateChecks.get(day)?.length === 0)) panel.append(element('p', 'notice', 'Bu günlerde uygun saat yok. Başka günlere veya başka bir berbere bakabilirsin.'));
-  else if (days.some(day => dateChecks.get(day)?.length === 0)) panel.append(element('p', 'calendar-note', 'Üzeri çizili günlerde bu hizmet için müsait saat yok.'));
-  actions(panel, Boolean(draft.date) && !checking, 'Saat seçimine geç');
-}
-
-function timesStep(panel) {
-  if (conflictNotice) panel.append(alertBox(conflictNotice));
-  if (checking) panel.append(element('p', 'loading', 'Müsait saatler yükleniyor…'));
-  else if (loadError) panel.append(alertBox(loadError, loadTimes));
-  else if (!timeOptions.length) panel.append(element('p', 'notice', 'Bu tarihte uygun saat kalmadı. Geri dönüp başka bir tarih seçebilirsin.'));
-  else {
-    const times = element('div', 'times');
-    for (const [name, start, end] of [['Sabah', 0, 12], ['Öğleden sonra', 12, 17], ['Akşam', 17, 24]]) {
-      const group = timeOptions.filter(time => Number(time.slice(0, 2)) >= start && Number(time.slice(0, 2)) < end);
-      if (!group.length) continue;
-      const grid = element('div', 'time-grid');
-      for (const time of group) {
-        const choice = button(time, 'time-cell', () => {
-          if (draft.time !== time) draft.requestId = '';
-          draft.time = time;
-          conflictNotice = '';
-          render();
-        }, 'time-' + time);
-        choice.setAttribute('aria-pressed', String(draft.time === time));
-        grid.append(choice);
-      }
-      times.append(element('h4', '', name), grid);
-    }
-    panel.append(times);
-  }
-  actions(panel, !checking && !loadError && timeOptions.includes(draft.time), 'Bilgilerime geç');
-}
-
-function field(name, title, type, placeholder, maxLength) {
-  const container = element('div', 'field');
-  const label = element('label', '', title);
-  const input = element('input');
-  label.htmlFor = input.id = 'booking-' + name;
-  input.name = name;
-  input.type = type;
-  if (type === 'tel') input.inputMode = 'tel';
-  input.autocomplete = name === 'name' ? 'name' : 'tel';
-  input.placeholder = placeholder;
-  input.required = true;
-  input.maxLength = maxLength;
-  input.disabled = submitting;
-  input.value = draft[name];
-  if (formErrorField === name) {
-    input.setAttribute('aria-invalid', 'true');
-    input.setAttribute('aria-describedby', 'booking-error');
-  }
-  input.addEventListener('input', () => {
-    draft[name] = input.value;
-    draft.requestId = '';
-    input.setCustomValidity('');
-    input.removeAttribute('aria-invalid');
-    input.removeAttribute('aria-describedby');
-  });
-  container.append(label, input);
-  return container;
-}
-
-function detailsStep(panel) {
-  const form = element('form', 'booking-form');
-  if (catalog.shop.isDemo) form.append(element('p', 'notice', 'Burası örnek bir salon. Deneme randevusu için örnek ad ve telefon kullan.'));
-  form.append(field('name', 'Ad soyad', 'text', 'Ör. Deniz Örnek', 80),
-    field('phone', 'Telefon numarası', 'tel', '05XX XXX XX XX', 64));
-  const consent = element('label', 'sms-consent');
-  const checkbox = element('input');
-  checkbox.type = 'checkbox';
-  checkbox.name = 'smsConsent';
-  checkbox.checked = draft.smsConsent;
-  checkbox.disabled = submitting;
-  checkbox.addEventListener('change', () => {
-    draft.smsConsent = checkbox.checked;
-  });
-  consent.append(checkbox, element('span', '', 'Randevum için cep telefonuma SMS hatırlatması almak istiyorum.'));
-  if (catalog.smsAvailable) form.append(consent);
-  const review = element('div', 'form-review');
-  review.append(element('strong', '', serviceNames()), element('p', '', barber().name + ' · ' + dateLabel(draft.date) + ' · ' + draft.time),
-    element('p', '', duration() + ' dakika · Toplam ' + currency.format(price())));
-  form.append(review);
-  if (formError) {
-    const error = alertBox(formError);
-    error.id = 'booking-error';
-    form.append(error);
-  }
-  const row = element('div', 'actions');
-  const back = button('Geri', 'secondary', () => go(3), 'back');
-  const submit = element('button', 'primary', submitting ? 'Kaydediliyor…' : 'Randevuyu onayla');
-  submit.type = 'submit';
-  submit.dataset.focus = 'submit';
-  submit.disabled = back.disabled = submitting;
-  row.append(back, submit);
-  form.append(row);
-  form.addEventListener('submit', e => {
-    e.preventDefault();
-    if (form.reportValidity()) save();
-  });
-  panel.append(form);
-}
-
-function readOnlyRow(label, value) {
-  const row = element('div');
-  row.append(element('dt', '', label), element('dd', '', value));
-  return row;
-}
-
-function confirmation() {
-  const panel = element('div', 'confirmation');
-  const badge = element('span', 'success-mark');
-  badge.append(icon('check'));
-  const heading = element('h3', '', 'Randevun oluşturuldu.');
-  heading.id = 'step-heading';
-  heading.tabIndex = -1;
-  const rows = element('dl');
-  rows.append(readOnlyRow('Randevu kodu', result.reference), readOnlyRow('Hizmet', result.serviceNames?.join(', ') ?? serviceNames()),
-    readOnlyRow('Berber', result.barberName ?? barber()?.name), readOnlyRow('Tarih ve saat', dateLabel(result.date) + ' · ' + result.time),
-    readOnlyRow('Süre', result.duration + ' dakika'), readOnlyRow('Toplam', currency.format(result.price)));
-  panel.append(badge, heading, element('p', 'subtle', 'Randevunun kodunu ve ayrıntılarını aşağıda bulabilirsin.'), rows);
-  const actions = element('div', 'confirmation-actions');
-  if (result.cancelPath) {
-    const link = element('a', 'secondary', 'İptal bağlantısı');
-    link.href = result.cancelPath;
-    link.rel = 'noreferrer';
-    panel.append(element('p', 'subtle', 'Randevunu daha sonra iptal etmek için bu bağlantıyı sakla.'));
-    actions.append(link);
-  }
-  actions.append(button('Yeni randevu oluştur', 'secondary', () => {
-      draft = initial();
-      result = null;
-      dateOffset = 0;
-      conflictNotice = '';
-      quoteNotice = '';
-      loadCatalog(true);
-    }));
-  panel.append(actions);
-  return panel;
-}
-
-function render(focusHeading = false) {
-  const headingWasFocused = app.contains(document.activeElement) && document.activeElement.id === 'step-heading';
-  const oldKey = app.contains(document.activeElement) ? document.activeElement.dataset.focus : '';
-  const currentReceipt = app.querySelector('details');
-  if (currentReceipt) receiptOpen = currentReceipt.open;
-  if (result) app.replaceChildren(confirmation());
-  else {
-    const workspace = element('div', 'workspace');
-    const left = element('div');
-    const panel = element('section', 'step-panel');
-    panel.setAttribute('aria-labelledby', 'step-heading');
-    const header = element('header', 'step-header');
-    const heading = element('h3', '', headings[draft.step]);
-    heading.id = 'step-heading';
-    heading.tabIndex = -1;
-    const descriptions = [
-      'Bir veya birden fazla hizmet seçebilirsin.',
-      'Seçtiğin hizmetleri sunan berberlerden birini seç.',
-      'Berberinin takviminden sana uygun bir gün seç.',
-      dateLabel(draft.date, { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + (barber()?.name || ''),
-      'Onaylamadan önce randevu ayrıntılarını kontrol et.',
-    ];
-    header.append(heading, element('p', '', descriptions[draft.step]));
-    panel.append(header);
-    [servicesStep, barbersStep, datesStep, timesStep, detailsStep][draft.step](panel);
-    left.append(stepper(), panel);
-    workspace.append(left, receipt());
-    app.replaceChildren(workspace);
-  }
-  if (focusHeading || headingWasFocused) {
-    const heading = document.getElementById('step-heading');
-    heading.focus({ preventScroll: true });
-    if (focusHeading && (heading.getBoundingClientRect().top < 0 || heading.getBoundingClientRect().top > window.innerHeight * .78)) {
-      document.getElementById('randevu').scrollIntoView({ block: 'start' });
-    }
-  } else if (oldKey) {
-    Array.from(app.querySelectorAll('[data-focus]')).find(el => el.dataset.focus === oldKey && !el.disabled)?.focus({ preventScroll: true });
-  }
-}
-
-function queryDay(day, signal) {
-  const query = new URLSearchParams({ barberId: draft.barberId, date: day });
-  draft.serviceIds.forEach(id => query.append('serviceId', id));
-  return request('/api/slots?' + query, { signal }).then(body => body.slots);
-}
-
-function startLookup() {
-  slotRequest?.abort();
-  slotRequest = new AbortController();
-  checking = true;
-  loadError = '';
-  return slotRequest.signal;
-}
-
-async function loadDates(focus = false) {
-  const signal = startLookup();
-  const days = week();
-  dateChecks = new Map();
-  render(focus === true);
-  const responses = await Promise.allSettled(days.map(day => queryDay(day, signal)));
-  if (signal.aborted) return;
-  checking = false;
-  if (responses.some(response => response.status === 'rejected' && staleCatalog(response.reason))) {
-    await restartWithCatalog();
-    return;
-  }
-  responses.forEach((response, i) => {
-    if (response.status === 'fulfilled') dateChecks.set(days[i], response.value);
-    else loadError = 'Bazı günlerin müsaitliği alınamadı. Tekrar deneyebilir veya gün seçerek saatleri kontrol edebilirsin.';
-  });
-  if (dateChecks.get(draft.date)?.length === 0) {
-    draft.date = draft.time = draft.requestId = '';
-  }
-  render();
-}
-
-async function loadTimes(focus = false) {
-  const signal = startLookup();
-  timeOptions = [];
-  render(focus === true);
+async function boot() {
   try {
-    const slots = await queryDay(draft.date, signal);
-    if (signal.aborted) return;
-    timeOptions = slots;
-    if (draft.time && !slots.includes(draft.time)) {
-      draft.time = draft.requestId = '';
-      conflictNotice = 'Önceki saat seçimin artık müsait değil. Yeni bir saat seç.';
-    }
-  } catch (error) {
-    if (signal.aborted) return;
-    if (staleCatalog(error)) {
-      checking = false;
-      await restartWithCatalog();
+    const {salons} = await api('/api/salons');
+    if (!salons.length) {
+      select.innerHTML = option('', 'Salon bulunmuyor');
+      content.innerHTML = '<p class="empty">Laboratuvardaki kurgusal salonları oluşturup ajandalarını deneyebilirsiniz.</p><button id="seed" class="primary">Örnek salonları oluştur</button>';
+      $('#seed').onclick = async event => {
+        event.currentTarget.disabled = true;
+        try { await api('/api/bootstrap', {}); await boot(); }
+        catch (error) { showLoadError(error, boot); }
+      };
       return;
     }
-    loadError = error.code ? error.message : 'Müsait saatler alınamadı. Bağlantını kontrol edip tekrar dene.';
-  }
-  checking = false;
-  render();
+    select.innerHTML = salons.map(s => option(s.id, s.name)).join('');
+    select.disabled = false;
+    await load();
+  } catch (error) { showLoadError(error, boot); }
 }
-
-function go(step) {
-  if (submitting) return;
-  slotRequest?.abort();
-  draft.step = step;
-  formError = formErrorField = loadError = conflictNotice = '';
-  checking = false;
-  if (step === 2) loadDates(true);
-  else if (step === 3) loadTimes(true);
-  else render(true);
-}
-
-async function save() {
-  if (submitting) return;
-  const { serviceIds, barberId, date, time, name, phone, smsConsent } = draft;
-  if (!draft.requestId) draft.requestId = crypto.randomUUID();
-  const payload = { serviceIds, barberId, date, time, name, phone, smsConsent, requestId: draft.requestId,
-    profileRevision: catalog.revision, quotedPrice: price(), quotedDuration: duration() };
-  formError = '';
-  formErrorField = '';
-  submitting = true;
-  render();
+async function load() {
+  const generation = ++sequence;
+  const id = select.value;
+  dashboard = null;
+  $('#shop-name').textContent = select.selectedOptions[0]?.textContent || 'İşletme paneli';
+  $('#add').hidden = true;
+  content.innerHTML = '<p class="empty" role="status">Ajanda yükleniyor…</p>';
   try {
-    result = await request('/api/bookings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    draft.name = draft.phone = '';
-    submitting = false;
-    render(true);
-  } catch (error) {
-    submitting = false;
-    if (staleCatalog(error)) {
-      await restartWithCatalog();
-    } else if (['SLOT_TAKEN', 'SLOT_UNAVAILABLE', 'BOOKING_CANCELLED'].includes(error.code)) {
-      draft.time = draft.requestId = '';
-      draft.step = 3;
-      conflictNotice = error.message;
-      loadTimes(true);
-    } else {
-      if (error.code === 'REQUEST_ID_REUSED') draft.requestId = '';
-      formError = error.code ? error.message : 'Onay cevabı alınamadı. Aynı randevuyu kontrol etmek için bilgileri değiştirmeden tekrar onayla.';
-      formErrorField = { INVALID_NAME: 'name', INVALID_PHONE: 'phone' }[error.code] || '';
-      render();
-      if (formErrorField) document.getElementById('booking-' + formErrorField).focus();
-      else app.querySelector('[data-focus=submit]')?.focus({ preventScroll: true });
+    const result = await api(pathFor(id));
+    if (generation !== sequence || id !== select.value) return;
+    dashboard = result;
+    render();
+  } catch (error) { if (generation === sequence) showLoadError(error, load); }
+}
+function render() {
+  const {salon, services, staff, appointments} = dashboard;
+  $('#shop-name').textContent = salon.name + ' · ' + salon.location;
+  $('#add').hidden = !services.length || !staff.length;
+  const rows = appointments.filter(a => a.day === day).sort((a,b) => a.startMinute - b.startMinute || a.staffName.localeCompare(b.staffName,'tr'));
+  const count = status => rows.filter(row => row.status === status).length;
+  const summary = Object.entries(labels).map(([status, label]) => {
+    const n = count(status);
+    return n ? n + ' ' + label.toLocaleLowerCase('tr') : '';
+  }).filter(Boolean).join(' · ');
+  const list = rows.map(a =>
+    '<li class="booking"><div class="time">' + time(a.startMinute) + '<small>' + time(a.endMinute) + '</small></div>' +
+    '<div><h3>' + esc(a.customerName) + '</h3><p>' + esc(a.serviceName) + ' · ' + esc(a.staffName) + '</p></div>' +
+    '<span class="status ' + esc(a.status) + '">' + esc(labels[a.status]) + '</span>' +
+    (transitions[a.status] ? '<button class="edit-status" data-id="' + esc(a.id) + '" aria-label="' + esc(a.customerName + ' için durum değiştir') + '">Durum değiştir</button>' : '') + '</li>').join('');
+  content.innerHTML = '<section class="agenda" aria-labelledby="agenda-day"><div class="agenda-heading"><h2 id="agenda-day">' + dayFormat.format(asDate(day)) + '</h2>' +
+    '<div class="controls"><button class="date-arrow" data-delta="-1" aria-label="Önceki gün">‹</button><input id="date" type="date" min="0001-01-01" max="9999-12-31" aria-label="Ajanda tarihi" value="' + esc(day) + '"><button class="date-arrow" data-delta="1" aria-label="Sonraki gün">›</button><button id="today">Bugün</button></div></div>' +
+    '<p class="summary">' + (summary || '0 randevu') + '</p>' +
+    (rows.length ? '<ul id="list">' + list + '</ul>' : '<p class="empty">Bu gün için kayıtlı randevu yok.</p>') + '</section>' +
+    '<details><summary>Hizmetler (' + services.length + ')</summary><ul>' + services.map(s=>'<li>' + esc(s.name) + ' · ' + s.duration + ' dk · ' + lira.format(s.price) + '</li>').join('') + '</ul></details>' +
+    '<details><summary>Çalışanlar (' + staff.length + ')</summary><ul>' + staff.map(s=>'<li>' + esc(s.name) + ' · ' + esc(s.role) + '</li>').join('') + '</ul></details>';
+}
+function setDate(value, focusSelector) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '0001-01-01') return;
+  day = value;
+  render();
+  if (focusSelector) $(focusSelector)?.focus();
+  $('#announcement').textContent = dayFormat.format(asDate(day));
+}
+content.addEventListener('change', event => {
+  if (event.target.id === 'date' && event.target.validity.valid && event.target.value) setDate(event.target.value, '#date');
+});
+content.addEventListener('click', event => {
+  const button = event.target.closest('button');
+  if (!button || !dashboard) return;
+  if (button.dataset.delta) {
+    const date = asDate(day);
+    date.setUTCDate(date.getUTCDate() + Number(button.dataset.delta));
+    setDate(date.toISOString().slice(0,10), '[data-delta="' + button.dataset.delta + '"]');
+  }
+  if (button.id === 'today') setDate(today(), '#today');
+  if (button.dataset.id) {
+    const row = dashboard.appointments.find(a=>a.id === button.dataset.id);
+    if (row && transitions[row.status]) openEditor(row);
+  }
+});
+function updateSubmit() {
+  const cancel = editor?.row && form.elements.status.value === 'cancelled';
+  $('#submit').textContent = cancel ? 'İptali onayla' : editor?.row ? 'Durumu kaydet' : 'Randevu ekle';
+  $('#submit').className = cancel ? 'danger' : 'primary';
+  const warning = $('#cancel-note');
+  if (warning) warning.hidden = !cancel;
+}
+function openEditor(row) {
+  if (!dashboard || busy) return;
+  editor = { salonId: dashboard.salon.id, generation:sequence, row };
+  $('#dialog-title').textContent = row ? 'Randevu durumu' : 'Yeni örnek randevu';
+  $('#context').textContent = row ? [dashboard.salon.name, row.customerName, row.staffName, dayFormat.format(asDate(row.day)),time(row.startMinute)].join(' · ') : dashboard.salon.name;
+  $('#feedback').hidden = true;
+  if (row) {
+    $('#fields').innerHTML = '<label>Yeni durum<select name="status" required><option value="">Durum seçin</option>' +
+      transitions[row.status].map(status=>option(status, status === 'cancelled' ? 'Randevuyu iptal et' : labels[status])).join('') +
+      '</select></label><p id="cancel-note" hidden>Onayladığınızda bu randevu iptal edilir ve saat yeniden açılır.</p>';
+    form.elements.status.onchange = updateSubmit;
+  } else {
+    $('#fields').innerHTML = '<label>Müşteri adı<input name="customerName" minlength="2" maxlength="80" placeholder="Örnek müşteri" required></label><label>Hizmet<select name="serviceId" required>' +
+      dashboard.services.map(s=>option(s.id,s.name)).join('') + '</select></label><label>Çalışan<select name="staffId" required>' +
+      dashboard.staff.map(s=>option(s.id,s.name)).join('') + '</select></label><label>Tarih<input name="day" type="date" value="' + esc(day) +
+      '" required></label><label>Saat<input name="time" type="time" step="900" required></label>';
+  }
+  updateSubmit();
+  modal.showModal();
+}
+$('#add').onclick = () => openEditor(null);
+$('#dismiss').onclick = () => { if (!busy) modal.close(); };
+modal.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+select.onchange = () => {
+  if (modal.open) modal.close();
+  $('#announcement').textContent = '';
+  load();
+};
+form.onsubmit = async event => {
+  event.preventDefault();
+  const state = editor;
+  if (busy || !state || state.salonId !== select.value || state.generation !== sequence) return;
+  const row = state.row;
+  const data = Object.fromEntries(new FormData(form));
+  const body = row ? {appointmentId:row.id, status:data.status, expectedStatus:row.status} : data;
+  const pendingButton = $('#submit');
+  busy = true;
+  pendingButton.disabled = true;
+  $('#dismiss').disabled = true;
+  $('#feedback').hidden = true;
+  try {
+    await api(pathFor(state.salonId) + (row ? '/status' : '/appointments'), body);
+    if (state.generation !== sequence || state.salonId !== select.value) return;
+    if (!row) day = data.day;
+    modal.close();
+    $('#announcement').textContent = row ? 'Randevu durumu kaydedildi.' : 'Randevu eklendi.';
+    await load();
+    if (select.value === state.salonId) {
+      const next = row && content.querySelector('[data-id="' + CSS.escape(row.id) + '"]');
+      (next || $('#date'))?.focus();
     }
-  }
-}
-
-function staleCatalog(error) {
-  return ['PROFILE_CHANGED', 'QUOTE_CHANGED', 'INVALID_SERVICE', 'INVALID_BARBER'].includes(error?.code);
-}
-
-function restartWithCatalog() {
-  draft.serviceIds = [];
-  draft.barberId = '';
-  draft.step = 0;
-  resetSchedule();
-  quoteNotice = 'Salon bilgileri güncellendi. Hizmetleri, fiyatları ve süreleri yeniden inceleyip seçim yap.';
-  return loadCatalog(true);
-}
-
-async function loadCatalog(focus = false) {
-  app.setAttribute('aria-busy', 'true');
-  try {
-    catalog = await request('/api/catalog');
-    applySalonBrand(catalog.shop);
-    render(focus === true);
-  } catch {
-    app.replaceChildren(alertBox('Hizmet listesi yüklenemedi. Bağlantını kontrol edip tekrar dene.', loadCatalog));
+  } catch (error) {
+    if (state.generation !== sequence) return;
+    if (row && error.code === 'STATUS_CONFLICT') {
+      modal.close();
+      $('#announcement').textContent = 'Randevu başka bir işlemle değişti. Ajanda yenilendi.';
+      await load();
+    } else {
+      $('#feedback').textContent = error.message;
+      $('#feedback').hidden = false;
+    }
   } finally {
-    app.setAttribute('aria-busy', 'false');
+    busy = false;
+    pendingButton.disabled = false;
+    $('#dismiss').disabled = false;
   }
-}
-
-const dialog = document.getElementById('salon-dialog');
-document.querySelectorAll('.salon-trigger').forEach(el => el.addEventListener('click', () => dialog.showModal()));
-document.getElementById('salon-close').addEventListener('click', () => dialog.close());
-document.getElementById('salon-book').addEventListener('click', () => {
-  dialog.close();
-  document.getElementById('booking-heading').focus();
-});
-dialog.addEventListener('click', event => {
-  if (event.target !== dialog) return;
-  const rect = dialog.getBoundingClientRect();
-  if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
-});
-loadCatalog();
+};
+boot();
